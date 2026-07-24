@@ -1,0 +1,99 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-background: #EEF3F8;
+  --color-card: #FFFFFF;
+  --color-primary: #153A60;
+  --color-accent: #0F766E;
+  --color-success: #22C55E;
+  --color-warning: #F59E0B;
+  --color-danger: #EF4444;
+  --color-text: #0F172A;
+  --color-border: #E5E7EB;
+}
+
+.dark {
+  --color-background: #0F172A;
+  --color-card: #1E293B;
+  --color-text: #F8FAFC;
+  --color-border: #334155;
+  --color-primary: #2563EB;
+  --color-accent: #14B8A6;
+}
+
+* { box-sizing: border-box; }
+html { background: var(--color-background); }
+body { margin: 0; min-width: 320px; background: var(--color-background); color: var(--color-text); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+button, input, textarea, select { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+
+@layer components {
+  .surface { @apply rounded-xl border border-border bg-card shadow-sm dark:border-slate-700 dark:bg-slate-800; }
+  .input { @apply w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-text outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-50; }
+  .btn-primary { @apply inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md active:scale-[.97] disabled:opacity-50; }
+  .btn-secondary { @apply inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-semibold text-text shadow-sm transition hover:-translate-y-0.5 hover:shadow-md active:scale-[.97] dark:border-slate-600 dark:bg-slate-800 dark:text-slate-50; }
+  .eyebrow { @apply text-xs font-bold uppercase tracking-[0.16em] text-primary; }
+}
+
+/* Light-mode premium clinical recolour. Dark mode deliberately remains untouched. */
+html:not(.dark) body {
+  background:
+    radial-gradient(circle at 92% 3%, rgba(32, 111, 126, 0.10), transparent 24rem),
+    radial-gradient(circle at 8% 100%, rgba(21, 58, 96, 0.08), transparent 26rem),
+    var(--color-background);
+}
+
+html:not(.dark) .surface { border-color: #D2DFEB; box-shadow: 0 8px 22px rgba(15, 43, 73, 0.08); }
+html:not(.dark) .input { border-color: #C8D6E5; background-color: #FBFDFF; color: #102B48; }
+html:not(.dark) .input:focus { border-color: #1C527F; box-shadow: 0 0 0 3px rgba(28, 82, 127, 0.14); }
+html:not(.dark) .btn-primary,
+html:not(.dark) [class~="bg-primary"] { background-color: #153A60; }
+html:not(.dark) .btn-primary:hover,
+html:not(.dark) [class~="bg-primary"]:hover { background-color: #0E2B49; }
+html:not(.dark) .btn-secondary { border-color: #B9CBDE; background-color: #F9FCFF; color: #153A60; }
+html:not(.dark) .text-primary { color: #153A60; }
+html:not(.dark) [class~="bg-primary/5"] { background-color: #EDF4FA; }
+html:not(.dark) [class~="bg-primary/10"] { background-color: #E3EEF7; }
+html:not(.dark) [class~="border-primary/40"] { border-color: #85A8C6; }
+html:not(.dark) [class~="ring-primary/20"] { --tw-ring-color: rgba(21, 58, 96, 0.16); }
+html:not(.dark) [class~="bg-accent"] { background-color: #0F766E; }
+html:not(.dark) [class~="text-accent"] { color: #0F766E; }
+html:not(.dark) [class~="border-l-accent"] { border-left-color: #0F766E; }
+html:not(.dark) [class~="bg-accent/15"] { background-color: #D7EFEB; }
+html:not(.dark) .bg-slate-50 { background-color: #F5F8FC; }
+html:not(.dark) .bg-slate-100 { background-color: #EAF1F7; }
+html:not(.dark) .text-slate-500 { color: #62758A; }
+html:not(.dark) .text-slate-600 { color: #415A73; }
+html:not(.dark) .border-border { border-color: #D2DFEB; }
+
+html:not(.dark) .app-header {
+  border-color: #0B2845;
+  background: linear-gradient(105deg, #0D2B4A 0%, #153A60 58%, #174E68 100%);
+  color: #F8FCFF;
+  box-shadow: 0 3px 15px rgba(8, 35, 61, 0.22);
+}
+html:not(.dark) .app-header .text-primary { color: #B9E7DE; }
+html:not(.dark) .app-header .btn-secondary,
+html:not(.dark) .app-header button:not(.btn-primary) { border-color: rgba(226, 241, 249, 0.30); background-color: rgba(255, 255, 255, 0.10); color: #F8FCFF; }
+html:not(.dark) .app-header .btn-secondary:hover,
+html:not(.dark) .app-header button:not(.btn-primary):hover { background-color: rgba(255, 255, 255, 0.18); }
+html:not(.dark) .patient-context-bar { border-color: #C9DCE8; background: linear-gradient(90deg, #E8F2F9, #F8FCFE 65%, #E6F4F1); }
+html:not(.dark) .app-sidebar {
+  border-right-color: #BFD2E1;
+  background: linear-gradient(180deg, #F4F9FD 0%, #E7F1F7 72%, #E1F1EE 100%);
+  box-shadow: 5px 0 18px rgba(15, 43, 73, 0.05);
+}
+html:not(.dark) .app-bottom-nav {
+  border-color: #BFD2E1;
+  background: linear-gradient(90deg, #F4F9FD, #E7F1F7, #E1F1EE);
+}
+html:not(.dark) .landing-page,
+html:not(.dark) .auth-page {
+  background:
+    radial-gradient(circle at 50% -10%, rgba(22, 78, 118, 0.17), transparent 32rem),
+    radial-gradient(circle at 6% 94%, rgba(15, 118, 110, 0.10), transparent 25rem),
+    #EEF3F8;
+}

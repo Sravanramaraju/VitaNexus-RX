@@ -1,0 +1,12 @@
+[
+  { "brand": "Crocin", "generic": "Paracetamol (Acetaminophen)" },
+  { "brand": "Dolo 650", "generic": "Paracetamol 650mg" },
+  { "brand": "Combiflam", "generic": "Ibuprofen + Paracetamol" },
+  { "brand": "Disprin", "generic": "Aspirin" },
+  { "brand": "Digene", "generic": "Aluminium Hydroxide + Magnesium Hydroxide + Simethicone" },
+  { "brand": "Gelusil", "generic": "Aluminium Hydroxide + Magnesium Hydroxide + Simethicone" },
+  { "brand": "ENO", "generic": "Sodium Bicarbonate + Citric Acid + Sodium Carbonate" },
+  { "brand": "Benadryl", "generic": "Diphenhydramine" },
+  { "brand": "Vicks Action 500", "generic": "Paracetamol + Phenylephrine + Caffeine" },
+  { "brand": "Saridon", "generic": "Paracetamol + Propyphenazone + Caffeine" }
+]
