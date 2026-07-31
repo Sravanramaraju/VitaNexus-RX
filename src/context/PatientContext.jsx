@@ -31,7 +31,14 @@ export function PatientProvider({ children }) {
   const editPatient = (patientId, basicInfo, clinicalInfo) => { updatePatient(patientId, (patient) => ({ ...patient, ...basicInfo, ...clinicalInfo })); refreshPatients() }
   const deletePatientById = (patientId) => { deletePatient(patientId); refreshPatients() }
   const submitFeedback = (patientId, visitId, feedback) => {
-    const updated = updatePatient(patientId, (patient) => ({ ...patient, visits: patient.visits.map((visit) => visit.id !== visitId ? visit : { ...visit, feedback, updatedRecommendations: generateUpdatedRecommendations(feedback, visit.recommendations), status: 'completed' }) }))
+    const updated = updatePatient(patientId, (patient) => ({ ...patient, visits: patient.visits.map((visit) => {
+      if (visit.id !== visitId) return visit
+      if (visit.status === 'completed') {
+        const furtherFollowUp = { id: crypto.randomUUID(), date: new Date().toISOString(), ...feedback }
+        return { ...visit, followUps: [...(visit.followUps || []), furtherFollowUp], updatedRecommendations: generateUpdatedRecommendations(feedback, visit.updatedRecommendations?.length ? visit.updatedRecommendations : visit.recommendations) }
+      }
+      return { ...visit, feedback, updatedRecommendations: generateUpdatedRecommendations(feedback, visit.recommendations), status: 'completed' }
+    }) }))
     refreshPatients(); return updated
   }
   const saveVisitNotes = (patientId, visitId, doctorNotes) => { updatePatient(patientId, (patient) => ({ ...patient, visits: patient.visits.map((visit) => visit.id === visitId ? { ...visit, doctorNotes } : visit) })); refreshPatients() }
