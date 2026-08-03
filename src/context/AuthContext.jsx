@@ -6,10 +6,12 @@ const AuthContext = createContext(null)
 export function AuthProvider({ children }) {
   const [doctor, setDoctor] = useState(getCurrentDoctor())
 
-  const register = (name, email, password) => {
+  const register = (name, email, password, profile = {}) => {
     const doctors = getDoctors()
     if (doctors.some((item) => item.email.toLowerCase() === email.toLowerCase())) throw new Error('Email already registered')
-    const newDoctor = { id: crypto.randomUUID(), name, email, password }
+    if (!/^[A-Za-z][A-Za-z .'-]*$/.test(name.trim())) throw new Error('Name can contain letters, spaces, periods, apostrophes, and hyphens only')
+    if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password) || !/[^A-Za-z0-9]/.test(password)) throw new Error('Password does not meet the required format')
+    const newDoctor = { id: crypto.randomUUID(), name: name.trim(), email, password, ...profile }
     saveDoctors([...doctors, newDoctor]); setCurrentDoctor(newDoctor); setDoctor(newDoctor)
     return newDoctor
   }
