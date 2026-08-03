@@ -134,6 +134,32 @@ function UpdatedRecommendations({ visit, historical, onBack }) {
   return <div className="space-y-5"><ResultCard title="Follow-up Recommendation"><p className="mt-2 text-sm text-slate-600 dark:text-slate-300">Recommendations re-ranked after physician feedback.</p><div className="mt-4 space-y-4">{items.length ? items.map((recommendation, index) => { const severity = severityFromRisk(recommendation.riskPct); const reliability = reliabilityFromConfidence(null, recommendation.confidencePct); return <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-700/50" key={`${recommendation.drug}-${index}`}><strong>{index + 1}. {recommendation.drug}</strong><div className="mt-3 grid grid-cols-2 gap-x-5 gap-y-4"><Metric label="Interaction Severity"><InteractionSeverityBadge severity={severity} /></Metric><Metric label="Predicted Interaction Risk">{recommendation.riskPct}%</Metric><Metric label="Prediction Confidence">{recommendation.confidencePct}%</Metric><Metric label="Reliability">{reliability}</Metric><Metric label="Confidence Interval" className="col-span-2">{recommendation.intervalLow}% - {recommendation.intervalHigh}%</Metric></div><RangeBar low={recommendation.intervalLow} high={recommendation.intervalHigh} /></div>}) : <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500 dark:bg-slate-700/50">Follow-up recommendations appear after feedback is saved.</p>}</div><ExplainToggle label="Why ranked?" reasons={getRankingReasons()} /></ResultCard>{historical && <button className="btn-secondary" onClick={onBack}><ChevronLeft size={16} />Follow-up</button>}</div>
 }
 
+function WizardSteps({ activeStep, visitedSteps, onStepChange }) {
+  const steps = [
+    ['results', 'Results'],
+    ['followup', 'Follow-up'],
+    ['updated', 'Follow-up Recommendation'],
+  ]
+
+  return <nav className="mb-6 flex flex-wrap gap-2" aria-label="Visit steps">
+    {steps.map(([id, label]) => {
+      const available = visitedSteps[id]
+      const active = activeStep === id
+      return <button
+        key={id}
+        type="button"
+        onClick={() => onStepChange(id)}
+        disabled={!available}
+        aria-current={active ? 'step' : undefined}
+        title={available ? `Open ${label}` : `Complete the previous step to unlock ${label}`}
+        className={`rounded-full px-3 py-1 text-xs font-bold transition ${active ? 'bg-primary text-white' : 'bg-primary/10 text-primary'} ${available ? 'cursor-pointer hover:bg-primary/20' : 'cursor-not-allowed opacity-45'}`}
+      >
+        {label}
+      </button>
+    })}
+  </nav>
+}
+
 export default function PatientRecord() {
   const { patientId } = useParams()
   const location = useLocation()
@@ -144,6 +170,11 @@ export default function PatientRecord() {
   const stateForVisit = location.state?.visitId && location.state.visitId !== activeVisit?.id ? null : location.state
   const [step, setStep] = useState(() => resolveEntryStep(activeVisit, stateForVisit))
   const [resolvedVisitId, setResolvedVisitId] = useState(activeVisit?.id || null)
+  const [visitedSteps, setVisitedSteps] = useState(() => ({
+    results: true,
+    followup: activeVisit?.status === 'completed' || resolveEntryStep(activeVisit, stateForVisit) === 'followup',
+    updated: activeVisit?.status === 'completed',
+  }))
 
   useEffect(() => {
     if (!patient) return
@@ -156,6 +187,11 @@ export default function PatientRecord() {
   useEffect(() => {
     if (activeVisit && resolvedVisitId !== activeVisit.id) {
       setStep(resolveEntryStep(activeVisit, stateForVisit))
+      setVisitedSteps({
+        results: true,
+        followup: activeVisit.status === 'completed' || resolveEntryStep(activeVisit, stateForVisit) === 'followup',
+        updated: activeVisit.status === 'completed',
+      })
       setResolvedVisitId(activeVisit.id)
     }
   }, [activeVisit, resolvedVisitId, stateForVisit])
@@ -166,11 +202,18 @@ export default function PatientRecord() {
   const freshInProgress = activeVisit.status === 'in-progress' && location.state?.entry === 'results' && location.state?.visitId === activeVisit.id
   const submit = (feedback) => submitFeedback(patient.id, activeVisit.id, feedback)
   const startNewPatient = () => navigate('/patients/new')
+  const goToVisitedStep = (target) => {
+    if (visitedSteps[target]) setStep(target)
+  }
+  const advanceToStep = (target) => {
+    setVisitedSteps((current) => ({ ...current, [target]: true }))
+    setStep(target)
+  }
   const body = step === 'results'
-    ? <Results visit={activeVisit} historical={historical} onNext={() => setStep('followup')} onSaveNotes={(notes) => saveVisitNotes(patient.id, activeVisit.id, notes)} onAddPatient={startNewPatient} />
+    ? <Results visit={activeVisit} historical={historical} onNext={() => advanceToStep('followup')} onSaveNotes={(notes) => saveVisitNotes(patient.id, activeVisit.id, notes)} onAddPatient={startNewPatient} />
     : step === 'followup'
-      ? <FollowUp visit={activeVisit} historical={historical} onSubmit={submit} onNext={(target) => setStep(target || 'updated')} onAddPatient={startNewPatient} />
-      : <UpdatedRecommendations visit={activeVisit} historical={historical} onBack={() => setStep('followup')} />
+      ? <FollowUp visit={activeVisit} historical={historical} onSubmit={submit} onNext={(target) => target === 'results' ? goToVisitedStep('results') : advanceToStep('updated')} onAddPatient={startNewPatient} />
+      : <UpdatedRecommendations visit={activeVisit} historical={historical} onBack={() => goToVisitedStep('followup')} />
 
-  return <section className="mx-auto max-w-5xl"><div className="mb-6 flex flex-wrap items-center justify-between gap-3"><div><p className="eyebrow">Visit workspace</p><h1 className="mt-1 text-2xl font-bold">{activeVisit.prescribedDrug?.brand || 'Consultation'} <span className="text-slate-400">-</span> {activeVisit.diagnosis || 'Clinical review'}</h1></div>{!freshInProgress && <button onClick={() => navigate('/patients/new', { state: { existingPatientId: patient.id } })} className="btn-secondary"><ClipboardPlus size={16} />New Consultation</button>}</div><div className="mb-6 flex gap-2"><span className={`rounded-full px-3 py-1 text-xs font-bold ${step === 'results' ? 'bg-primary text-white' : 'bg-primary/10 text-primary'}`}>Results</span><span className={`rounded-full px-3 py-1 text-xs font-bold ${step === 'followup' ? 'bg-primary text-white' : 'bg-primary/10 text-primary'}`}>Follow-up</span><span className={`rounded-full px-3 py-1 text-xs font-bold ${step === 'updated' ? 'bg-primary text-white' : 'bg-primary/10 text-primary'}`}>Follow-up Recommendation</span></div><AnimatePresence mode="wait"><motion.div key={`${activeVisit.id}-${step}`} initial={{ opacity: 0, x: 18 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -18 }} transition={{ duration: 0.3, ease: 'easeInOut' }}>{body}</motion.div></AnimatePresence></section>
+  return <section className="mx-auto max-w-5xl"><div className="mb-6 flex flex-wrap items-center justify-between gap-3"><div><p className="eyebrow">Visit workspace</p><h1 className="mt-1 text-2xl font-bold">{activeVisit.prescribedDrug?.brand || 'Consultation'} <span className="text-slate-400">-</span> {activeVisit.diagnosis || 'Clinical review'}</h1></div>{!freshInProgress && <button onClick={() => navigate('/patients/new', { state: { existingPatientId: patient.id } })} className="btn-secondary"><ClipboardPlus size={16} />New Consultation</button>}</div><WizardSteps activeStep={step} visitedSteps={visitedSteps} onStepChange={goToVisitedStep} /><AnimatePresence mode="wait"><motion.div key={`${activeVisit.id}-${step}`} initial={{ opacity: 0, x: 18 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -18 }} transition={{ duration: 0.3, ease: 'easeInOut' }}>{body}</motion.div></AnimatePresence></section>
 }
