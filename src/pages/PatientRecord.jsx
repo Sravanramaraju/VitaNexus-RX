@@ -86,7 +86,7 @@ function Results({ visit, historical, onNext, onSaveNotes, onAddPatient }) {
             <div className="mt-3"><Metric label="Interaction Risk (%)">18%</Metric></div>
             <ExplainToggle reasons={getDrugAllergyReasons()} />
           </section>
-          <section className="border-t border-border pt-4 dark:border-slate-700">
+          <section className="rounded-lg border border-primary/20 bg-primary/5 p-4">
             <h3 className="text-sm font-bold">Overall Clinical Risk</h3>
             <div className="mt-3 grid grid-cols-2 gap-x-5 gap-y-4">
               <Metric label="Overall Risk (%)">{risk?.score ?? 0}%</Metric>
