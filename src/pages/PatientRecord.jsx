@@ -91,7 +91,6 @@ function Results({ visit, historical, onNext, onSaveNotes, onAddPatient }) {
             <div className="mt-3 grid grid-cols-2 gap-x-5 gap-y-4">
               <Metric label="Overall Risk (%)">{risk?.score ?? 0}%</Metric>
               <Metric label="Confidence">{confidence?.pct ?? 0}%</Metric>
-              <Metric label="Confidence Interval" className="col-span-2">{confidence?.intervalLow ?? 0}% - {confidence?.intervalHigh ?? 0}%</Metric>
             </div>
             <ExplainToggle reasons={getOverallClinicalRiskReasons()} />
           </section>
