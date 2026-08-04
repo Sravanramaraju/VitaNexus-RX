@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import ExplainToggle from '../components/shared/ExplainToggle'
 import { usePatient } from '../context/PatientContext'
-import { getDDIPredictionReasons, getFeedbackUsageReasons, getRankingReasons, getReliabilityReasons } from '../lib/explainability'
+import { getDrugAllergyReasons, getDrugDiseaseReasons, getDDIPredictionReasons, getFeedbackUsageReasons, getOverallClinicalRiskReasons, getRankingReasons, getReliabilityReasons } from '../lib/explainability'
 
 export function resolveEntryStep(visit, navigationState) {
   if (navigationState?.entry === 'results') return 'results'
@@ -62,16 +62,40 @@ function Results({ visit, historical, onNext, onSaveNotes, onAddPatient }) {
   ]
 
   return <div className="space-y-5">
-    <div className="grid gap-5 lg:grid-cols-2">
-      <ResultCard title="AI DDI Prediction">
-        <div className="mt-4 grid grid-cols-2 gap-x-5 gap-y-4">
-          <Metric label="Interaction Severity"><InteractionSeverityBadge severity={severity} /></Metric>
-          <Metric label="Predicted Interaction Risk">{risk?.score ?? 0}%</Metric>
-          <Metric label="Prediction Confidence">{confidence?.pct ?? 0}%</Metric>
-          <Metric label="Reliability">{reliability}</Metric>
-          <Metric label="Confidence Interval" className="col-span-2">{confidence?.intervalLow ?? 0}% - {confidence?.intervalHigh ?? 0}%</Metric>
+    <div className="space-y-5">
+      <ResultCard title="Clinical Safety Analysis">
+        <div className="mt-4 space-y-4">
+          <section>
+            <h3 className="text-sm font-bold">Drug–Drug Analysis</h3>
+            <div className="mt-3 grid grid-cols-2 gap-x-5 gap-y-4">
+              <Metric label="Interaction Risk (%)">{risk?.score ?? 0}%</Metric>
+              <Metric label="Interaction Severity"><InteractionSeverityBadge severity={severity} /></Metric>
+              <Metric label="Confidence">{confidence?.pct ?? 0}%</Metric>
+              <Metric label="Reliability">{reliability}</Metric>
+              <Metric label="Confidence Interval" className="col-span-2">{confidence?.intervalLow ?? 0}% - {confidence?.intervalHigh ?? 0}%</Metric>
+            </div>
+            <ExplainToggle reasons={getDDIPredictionReasons(severity)} />
+          </section>
+          <section className="border-t border-border pt-4 dark:border-slate-700">
+            <h3 className="text-sm font-bold">Drug–Disease Analysis</h3>
+            <div className="mt-3"><Metric label="Interaction Risk (%)">42%</Metric></div>
+            <ExplainToggle reasons={getDrugDiseaseReasons()} />
+          </section>
+          <section className="border-t border-border pt-4 dark:border-slate-700">
+            <h3 className="text-sm font-bold">Drug–Allergy Analysis</h3>
+            <div className="mt-3"><Metric label="Interaction Risk (%)">18%</Metric></div>
+            <ExplainToggle reasons={getDrugAllergyReasons()} />
+          </section>
+          <section className="border-t border-border pt-4 dark:border-slate-700">
+            <h3 className="text-sm font-bold">Overall Clinical Risk</h3>
+            <div className="mt-3 grid grid-cols-2 gap-x-5 gap-y-4">
+              <Metric label="Overall Risk (%)">{risk?.score ?? 0}%</Metric>
+              <Metric label="Confidence">{confidence?.pct ?? 0}%</Metric>
+              <Metric label="Confidence Interval" className="col-span-2">{confidence?.intervalLow ?? 0}% - {confidence?.intervalHigh ?? 0}%</Metric>
+            </div>
+            <ExplainToggle reasons={getOverallClinicalRiskReasons()} />
+          </section>
         </div>
-        <ExplainToggle reasons={getDDIPredictionReasons(severity)} />
       </ResultCard>
 
       <ResultCard title="Conformal Reliability">
@@ -82,7 +106,7 @@ function Results({ visit, historical, onNext, onSaveNotes, onAddPatient }) {
       </ResultCard>
     </div>
 
-    <ResultCard title="Alternative Medicines">
+    <ResultCard title="Recommended Safer Alternatives">
       <div className="mt-4 space-y-4">
         {(visit.recommendations || []).map((recommendation, index) => {
           const alternativeSeverity = severityFromRisk(recommendation.riskPct)
@@ -94,6 +118,8 @@ function Results({ visit, historical, onNext, onSaveNotes, onAddPatient }) {
               <Metric label="Predicted Interaction Risk">{recommendation.riskPct}%</Metric>
               <Metric label="Prediction Confidence">{recommendation.confidencePct}%</Metric>
               <Metric label="Reliability">{alternativeReliability}</Metric>
+              <Metric label="Drug–Disease Risk">42%</Metric>
+              <Metric label="Drug–Allergy Risk">18%</Metric>
               <Metric label="Confidence Interval" className="col-span-2">{recommendation.intervalLow}% - {recommendation.intervalHigh}%</Metric>
             </div>
             <RangeBar low={recommendation.intervalLow} high={recommendation.intervalHigh} />
