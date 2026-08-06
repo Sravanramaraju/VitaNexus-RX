@@ -1,0 +1,244 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  CLINICIAN
+  ADMIN
+}
+
+enum ConsultationStatus {
+  IN_PROGRESS
+  COMPLETED
+  ARCHIVED
+}
+
+enum MedicationStatus {
+  ACTIVE
+  ON_HOLD
+  DISCONTINUED
+}
+
+model Clinician {
+  id              String       @id @default(uuid())
+  email           String       @unique
+  passwordHash    String
+  name            String
+  phone           String?
+  gender          String?
+  specialty       String?
+  practiceSetting String?
+  role            UserRole     @default(CLINICIAN)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  patients        Patient[]
+  consultations  Consultation[]
+  notes           DoctorNote[]
+  followUps       FollowUp[]
+  drafts          IntakeDraft[]
+  auditEvents     AuditEvent[]
+}
+
+model Patient {
+  id              String              @id @default(uuid())
+  publicId        String              @unique
+  clinicianId     String
+  clinician       Clinician           @relation(fields: [clinicianId], references: [id])
+  name            String
+  age             Int
+  gender          String
+  version         Int                 @default(1)
+  deletedAt       DateTime?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  conditions      PatientCondition[]
+  allergies       PatientAllergy[]
+  medications     PatientMedication[]
+  consultations   Consultation[]
+  drafts          IntakeDraft[]
+
+  @@index([clinicianId, deletedAt])
+  @@index([clinicianId, name])
+}
+
+model PatientCondition {
+  id          String   @id @default(uuid())
+  patientId   String
+  patient     Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  display     String
+  code        String?
+  duration    String?
+  source      String   @default("clinician-entered")
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model PatientAllergy {
+  id          String   @id @default(uuid())
+  patientId   String
+  patient     Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  display     String
+  code        String?
+  severity    String?
+  reaction    String?
+  source      String   @default("clinician-entered")
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model PatientMedication {
+  id          String           @id @default(uuid())
+  patientId   String
+  patient     Patient          @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  brand       String?
+  genericName String
+  dosage      String?
+  frequency   String?
+  route       String?
+  status      MedicationStatus @default(ACTIVE)
+  source      String           @default("clinician-entered")
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([patientId, status])
+}
+
+model Consultation {
+  id              String             @id @default(uuid())
+  patientId       String
+  patient         Patient            @relation(fields: [patientId], references: [id])
+  clinicianId     String
+  clinician       Clinician          @relation(fields: [clinicianId], references: [id])
+  indication      String
+  candidateBrand  String?
+  candidateGeneric String
+  dosage          String
+  frequency       String
+  route           String?
+  status          ConsultationStatus @default(IN_PROGRESS)
+  version         Int                @default(1)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  analyses        ClinicalAnalysis[]
+  adrPredictions  AdrPrediction[]
+  recommendations RecommendationSet[]
+  notes           DoctorNote[]
+  followUps       FollowUp[]
+
+  @@index([patientId, createdAt])
+  @@index([clinicianId, status])
+}
+
+model ClinicalAnalysis {
+  id               String       @id @default(uuid())
+  consultationId   String
+  consultation     Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
+  type             String
+  result           Json
+  engineVersion    String
+  inputHash        String
+  createdAt        DateTime     @default(now())
+
+  @@unique([consultationId, type, engineVersion])
+}
+
+model AdrPrediction {
+  id               String       @id @default(uuid())
+  consultationId   String
+  consultation     Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
+  result           Json
+  modelVersion     String
+  inputHash        String
+  createdAt        DateTime     @default(now())
+
+  @@unique([consultationId, modelVersion, inputHash])
+}
+
+model RecommendationSet {
+  id               String       @id @default(uuid())
+  consultationId   String
+  consultation     Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
+  recommendations  Json
+  engineVersion    String
+  inputHash        String
+  createdAt        DateTime     @default(now())
+
+  @@unique([consultationId, engineVersion, inputHash])
+}
+
+model DoctorNote {
+  id               String       @id @default(uuid())
+  consultationId   String
+  consultation     Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
+  authorId         String
+  author           Clinician    @relation(fields: [authorId], references: [id])
+  text             String
+  version          Int          @default(1)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@index([consultationId, updatedAt])
+}
+
+model FollowUp {
+  id               String       @id @default(uuid())
+  consultationId   String
+  consultation     Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
+  authorId         String
+  author           Clinician    @relation(fields: [authorId], references: [id])
+  adverseEvent     String
+  eventCode        String?
+  severity         String
+  durationDays     Int?
+  notes            String?
+  createdAt        DateTime     @default(now())
+}
+
+model IntakeDraft {
+  id          String    @id @default(uuid())
+  clinicianId String
+  clinician   Clinician @relation(fields: [clinicianId], references: [id])
+  patientId   String?
+  patient     Patient?  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  scope       String
+  payload     Json
+  version     Int       @default(1)
+  updatedAt   DateTime  @updatedAt
+  createdAt   DateTime  @default(now())
+
+  @@unique([clinicianId, scope])
+}
+
+model MedicationTerminology {
+  id        String   @id @default(uuid())
+  brand     String
+  generic   String
+  source    String   @default("VitaNexus prototype OTC mapping")
+  version   String   @default("2026.08")
+  createdAt DateTime @default(now())
+
+  @@unique([brand, generic])
+  @@index([brand])
+}
+
+model AuditEvent {
+  id          String    @id @default(uuid())
+  actorId     String?
+  actor       Clinician? @relation(fields: [actorId], references: [id])
+  action      String
+  entityType  String
+  entityId    String
+  requestId   String
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+
+  @@index([entityType, entityId])
+  @@index([actorId, createdAt])
+}

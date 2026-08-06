@@ -1,6 +1,11 @@
 export const COMMON_DISEASES = ['Diabetes', 'Hypertension', 'Asthma', 'Kidney Disease', 'Liver Disease']
 export const COMMON_ALLERGIES = ['Penicillin', 'Sulfa Drugs', 'Aspirin', 'Food Allergies']
 export const ALLERGY_SEVERITY_OPTIONS = ['Mild', 'Moderate', 'Severe']
+export const TREATMENT_INDICATIONS = [
+  'Acute pain', 'Allergic rhinitis', 'Asthma', 'Bacterial infection',
+  'Cough', 'Fever', 'Gastroesophageal reflux disease', 'Headache',
+  'Hypertension', 'Inflammation', 'Nausea and vomiting', 'Type 2 diabetes mellitus',
+]
 
 export const EXTENDED_DISEASES = [
   'Thyroid Disorder', 'Heart Disease', 'Epilepsy', 'Arthritis', 'COPD', 'Depression/Anxiety',

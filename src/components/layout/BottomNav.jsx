@@ -14,24 +14,33 @@ export default function BottomNav() {
           className="mx-auto flex items-center gap-2 text-sm font-bold text-primary"
         >
           <LayoutDashboard size={17} />
-          Dashboard
+          Save & Dashboard
         </NavLink>
       ) : (
-        patient.visits.map((visit, index) => (
-          <button
-            type="button"
-            onClick={() => setActiveVisitId(visit.id)}
-            key={visit.id}
-            className={`flex min-w-20 flex-1 flex-col items-center text-xs font-semibold ${activeVisitId === visit.id ? "text-primary" : "text-slate-500"}`}
+        <>
+          {patient.visits.map((visit, index) => (
+            <button
+              type="button"
+              onClick={() => setActiveVisitId(visit.id)}
+              key={visit.id}
+              className={`flex min-w-20 flex-1 flex-col items-center text-xs font-semibold ${activeVisitId === visit.id ? "text-primary" : "text-slate-500"}`}
+            >
+              {visit.status === "completed" ? (
+                <CheckCircle2 size={17} className="text-success" />
+              ) : (
+                <Clock3 size={17} className="text-warning" />
+              )}
+              <span>Visit {index + 1}</span>
+            </button>
+          ))}
+          <NavLink
+            to="/dashboard"
+            className="flex min-w-20 flex-1 flex-col items-center text-xs font-semibold text-primary"
           >
-            {visit.status === "completed" ? (
-              <CheckCircle2 size={17} className="text-success" />
-            ) : (
-              <Clock3 size={17} className="text-warning" />
-            )}
-            <span>Visit {index + 1}</span>
-          </button>
-        ))
+            <LayoutDashboard size={17} />
+            <span>Dashboard</span>
+          </NavLink>
+        </>
       )}
     </nav>
   );

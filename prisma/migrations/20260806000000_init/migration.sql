@@ -1,0 +1,53 @@
+-- Initial VitaNexus-RX PostgreSQL schema, generated from prisma/schema.prisma.
+CREATE TYPE "UserRole" AS ENUM ('CLINICIAN', 'ADMIN');
+CREATE TYPE "ConsultationStatus" AS ENUM ('IN_PROGRESS', 'COMPLETED', 'ARCHIVED');
+CREATE TYPE "MedicationStatus" AS ENUM ('ACTIVE', 'ON_HOLD', 'DISCONTINUED');
+
+CREATE TABLE "Clinician" ("id" TEXT NOT NULL, "email" TEXT NOT NULL, "passwordHash" TEXT NOT NULL, "name" TEXT NOT NULL, "phone" TEXT, "gender" TEXT, "specialty" TEXT, "practiceSetting" TEXT, "role" "UserRole" NOT NULL DEFAULT 'CLINICIAN', "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" TIMESTAMP(3) NOT NULL, CONSTRAINT "Clinician_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "Patient" ("id" TEXT NOT NULL, "publicId" TEXT NOT NULL, "clinicianId" TEXT NOT NULL, "name" TEXT NOT NULL, "age" INTEGER NOT NULL, "gender" TEXT NOT NULL, "version" INTEGER NOT NULL DEFAULT 1, "deletedAt" TIMESTAMP(3), "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" TIMESTAMP(3) NOT NULL, CONSTRAINT "Patient_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "PatientCondition" ("id" TEXT NOT NULL, "patientId" TEXT NOT NULL, "display" TEXT NOT NULL, "code" TEXT, "duration" TEXT, "source" TEXT NOT NULL DEFAULT 'clinician-entered', "isActive" BOOLEAN NOT NULL DEFAULT true, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" TIMESTAMP(3) NOT NULL, CONSTRAINT "PatientCondition_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "PatientAllergy" ("id" TEXT NOT NULL, "patientId" TEXT NOT NULL, "display" TEXT NOT NULL, "code" TEXT, "severity" TEXT, "reaction" TEXT, "source" TEXT NOT NULL DEFAULT 'clinician-entered', "isActive" BOOLEAN NOT NULL DEFAULT true, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" TIMESTAMP(3) NOT NULL, CONSTRAINT "PatientAllergy_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "PatientMedication" ("id" TEXT NOT NULL, "patientId" TEXT NOT NULL, "brand" TEXT, "genericName" TEXT NOT NULL, "dosage" TEXT, "frequency" TEXT, "route" TEXT, "status" "MedicationStatus" NOT NULL DEFAULT 'ACTIVE', "source" TEXT NOT NULL DEFAULT 'clinician-entered', "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" TIMESTAMP(3) NOT NULL, CONSTRAINT "PatientMedication_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "Consultation" ("id" TEXT NOT NULL, "patientId" TEXT NOT NULL, "clinicianId" TEXT NOT NULL, "indication" TEXT NOT NULL, "candidateBrand" TEXT, "candidateGeneric" TEXT NOT NULL, "dosage" TEXT NOT NULL, "frequency" TEXT NOT NULL, "route" TEXT, "status" "ConsultationStatus" NOT NULL DEFAULT 'IN_PROGRESS', "version" INTEGER NOT NULL DEFAULT 1, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" TIMESTAMP(3) NOT NULL, CONSTRAINT "Consultation_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "ClinicalAnalysis" ("id" TEXT NOT NULL, "consultationId" TEXT NOT NULL, "type" TEXT NOT NULL, "result" JSONB NOT NULL, "engineVersion" TEXT NOT NULL, "inputHash" TEXT NOT NULL, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "ClinicalAnalysis_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "AdrPrediction" ("id" TEXT NOT NULL, "consultationId" TEXT NOT NULL, "result" JSONB NOT NULL, "modelVersion" TEXT NOT NULL, "inputHash" TEXT NOT NULL, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "AdrPrediction_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "RecommendationSet" ("id" TEXT NOT NULL, "consultationId" TEXT NOT NULL, "recommendations" JSONB NOT NULL, "engineVersion" TEXT NOT NULL, "inputHash" TEXT NOT NULL, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "RecommendationSet_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "DoctorNote" ("id" TEXT NOT NULL, "consultationId" TEXT NOT NULL, "authorId" TEXT NOT NULL, "text" TEXT NOT NULL, "version" INTEGER NOT NULL DEFAULT 1, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" TIMESTAMP(3) NOT NULL, CONSTRAINT "DoctorNote_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "FollowUp" ("id" TEXT NOT NULL, "consultationId" TEXT NOT NULL, "authorId" TEXT NOT NULL, "adverseEvent" TEXT NOT NULL, "eventCode" TEXT, "severity" TEXT NOT NULL, "durationDays" INTEGER, "notes" TEXT, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "FollowUp_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "IntakeDraft" ("id" TEXT NOT NULL, "clinicianId" TEXT NOT NULL, "patientId" TEXT, "scope" TEXT NOT NULL, "payload" JSONB NOT NULL, "version" INTEGER NOT NULL DEFAULT 1, "updatedAt" TIMESTAMP(3) NOT NULL, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "IntakeDraft_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "MedicationTerminology" ("id" TEXT NOT NULL, "brand" TEXT NOT NULL, "generic" TEXT NOT NULL, "source" TEXT NOT NULL DEFAULT 'VitaNexus prototype OTC mapping', "version" TEXT NOT NULL DEFAULT '2026.08', "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "MedicationTerminology_pkey" PRIMARY KEY ("id"));
+CREATE TABLE "AuditEvent" ("id" TEXT NOT NULL, "actorId" TEXT, "action" TEXT NOT NULL, "entityType" TEXT NOT NULL, "entityId" TEXT NOT NULL, "requestId" TEXT NOT NULL, "metadata" JSONB, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "AuditEvent_pkey" PRIMARY KEY ("id"));
+
+CREATE UNIQUE INDEX "Clinician_email_key" ON "Clinician"("email");
+CREATE UNIQUE INDEX "Patient_publicId_key" ON "Patient"("publicId");
+CREATE INDEX "Patient_clinicianId_deletedAt_idx" ON "Patient"("clinicianId", "deletedAt");
+CREATE INDEX "Patient_clinicianId_name_idx" ON "Patient"("clinicianId", "name");
+CREATE INDEX "PatientMedication_patientId_status_idx" ON "PatientMedication"("patientId", "status");
+CREATE INDEX "Consultation_patientId_createdAt_idx" ON "Consultation"("patientId", "createdAt");
+CREATE INDEX "Consultation_clinicianId_status_idx" ON "Consultation"("clinicianId", "status");
+CREATE UNIQUE INDEX "ClinicalAnalysis_consultationId_type_engineVersion_key" ON "ClinicalAnalysis"("consultationId", "type", "engineVersion");
+CREATE UNIQUE INDEX "AdrPrediction_consultationId_modelVersion_inputHash_key" ON "AdrPrediction"("consultationId", "modelVersion", "inputHash");
+CREATE UNIQUE INDEX "RecommendationSet_consultationId_engineVersion_inputHash_key" ON "RecommendationSet"("consultationId", "engineVersion", "inputHash");
+CREATE INDEX "DoctorNote_consultationId_updatedAt_idx" ON "DoctorNote"("consultationId", "updatedAt");
+CREATE UNIQUE INDEX "IntakeDraft_clinicianId_scope_key" ON "IntakeDraft"("clinicianId", "scope");
+CREATE INDEX "MedicationTerminology_brand_idx" ON "MedicationTerminology"("brand");
+CREATE UNIQUE INDEX "MedicationTerminology_brand_generic_key" ON "MedicationTerminology"("brand", "generic");
+CREATE INDEX "AuditEvent_entityType_entityId_idx" ON "AuditEvent"("entityType", "entityId");
+CREATE INDEX "AuditEvent_actorId_createdAt_idx" ON "AuditEvent"("actorId", "createdAt");
+
+ALTER TABLE "Patient" ADD CONSTRAINT "Patient_clinicianId_fkey" FOREIGN KEY ("clinicianId") REFERENCES "Clinician"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "PatientCondition" ADD CONSTRAINT "PatientCondition_patientId_fkey" FOREIGN KEY ("patientId") REFERENCES "Patient"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "PatientAllergy" ADD CONSTRAINT "PatientAllergy_patientId_fkey" FOREIGN KEY ("patientId") REFERENCES "Patient"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "PatientMedication" ADD CONSTRAINT "PatientMedication_patientId_fkey" FOREIGN KEY ("patientId") REFERENCES "Patient"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "Consultation" ADD CONSTRAINT "Consultation_patientId_fkey" FOREIGN KEY ("patientId") REFERENCES "Patient"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "Consultation" ADD CONSTRAINT "Consultation_clinicianId_fkey" FOREIGN KEY ("clinicianId") REFERENCES "Clinician"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "ClinicalAnalysis" ADD CONSTRAINT "ClinicalAnalysis_consultationId_fkey" FOREIGN KEY ("consultationId") REFERENCES "Consultation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "AdrPrediction" ADD CONSTRAINT "AdrPrediction_consultationId_fkey" FOREIGN KEY ("consultationId") REFERENCES "Consultation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "RecommendationSet" ADD CONSTRAINT "RecommendationSet_consultationId_fkey" FOREIGN KEY ("consultationId") REFERENCES "Consultation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "DoctorNote" ADD CONSTRAINT "DoctorNote_consultationId_fkey" FOREIGN KEY ("consultationId") REFERENCES "Consultation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "DoctorNote" ADD CONSTRAINT "DoctorNote_authorId_fkey" FOREIGN KEY ("authorId") REFERENCES "Clinician"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "FollowUp" ADD CONSTRAINT "FollowUp_consultationId_fkey" FOREIGN KEY ("consultationId") REFERENCES "Consultation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "FollowUp" ADD CONSTRAINT "FollowUp_authorId_fkey" FOREIGN KEY ("authorId") REFERENCES "Clinician"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "IntakeDraft" ADD CONSTRAINT "IntakeDraft_clinicianId_fkey" FOREIGN KEY ("clinicianId") REFERENCES "Clinician"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "IntakeDraft" ADD CONSTRAINT "IntakeDraft_patientId_fkey" FOREIGN KEY ("patientId") REFERENCES "Patient"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "AuditEvent" ADD CONSTRAINT "AuditEvent_actorId_fkey" FOREIGN KEY ("actorId") REFERENCES "Clinician"("id") ON DELETE SET NULL ON UPDATE CASCADE;
