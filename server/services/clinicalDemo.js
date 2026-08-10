@@ -1,87 +1,92 @@
 import { stableHash } from "../utils.js";
+import { clinicalKnowledgeStatus, findPairwiseDrugInteraction } from "../repositories/clinicalKnowledgeRepository.js";
+import { adrPredictionProvider } from "./adrPredictionProvider.js";
+import { rankRecommendations, recommendationRankingConfig } from "./recommendationRankingService.js";
 
-const ENGINE_VERSION = "vitanexus-demo-rules-1.0.0";
-const MODEL_VERSION = "vitanexus-demo-adr-1.0.0";
-
+const ENGINE_VERSION = "vitanexus-demo-rules-1.2.0";
 const scoreFrom = (value, min = 0, max = 100) => {
   const hex = stableHash(value).slice(0, 8);
   return min + (Number.parseInt(hex, 16) % (max - min + 1));
 };
 const category = (score) => (score >= 61 ? "High" : score >= 31 ? "Moderate" : "Low");
 const reliability = (confidence) => (confidence >= 85 ? "High" : confidence >= 65 ? "Moderate" : "Low");
-const clean = (value = "") => value.toLowerCase().replace(/[^a-z]/g, "");
-
-const pairRule = (candidate, medicine) => {
-  const a = clean(candidate);
-  const b = clean(medicine);
-  const pair = [a, b].sort().join("|");
-  const rules = {
-    "aspirin|warfarin": [88, "Concurrent use may increase bleeding risk; clinician review is required."],
-    "ibuprofen|warfarin": [84, "Concurrent use may increase bleeding risk; clinician review is required."],
-    "fluoxetine|tramadol": [82, "Concurrent use may increase serotonin-toxicity risk; clinician review is required."],
-    "clarithromycin|simvastatin": [80, "Concurrent use may increase statin exposure; clinician review is required."],
-  };
-  return rules[pair] || null;
-};
 
 export const clinicalSafetyAssessment = ({ consultation, patient }) => {
   const activeMedicines = patient.medications.filter((medicine) => medicine.status === "ACTIVE");
   const interactionFindings = activeMedicines
     .map((medicine) => {
-      const rule = pairRule(consultation.candidateGeneric, medicine.genericName);
-      return rule && { medication: medicine.genericName, risk: rule[0], reason: rule[1] };
+      const rule = findPairwiseDrugInteraction(consultation.candidateGeneric, medicine.genericName);
+      return rule && {
+        medication: medicine.genericName,
+        riskPercentage: rule.riskPercentage,
+        interactionSeverity: rule.interactionSeverity,
+        reason: rule.explanation,
+        source: rule.source,
+        datasetVersion: rule.datasetVersion,
+        dataStatus: rule.dataStatus,
+      };
     })
     .filter(Boolean);
   const ddiRisk = interactionFindings.length
-    ? Math.max(...interactionFindings.map((finding) => finding.risk))
-    : scoreFrom({ candidate: consultation.candidateGeneric, activeMedicines: activeMedicines.map((m) => m.genericName) }, 4, 25);
+    ? Math.max(...interactionFindings.map((finding) => finding.riskPercentage))
+    : scoreFrom({ candidate: consultation.candidateGeneric, activeMedicines: activeMedicines.map((medicine) => medicine.genericName) }, 4, 25);
   const diseaseRisk = patient.conditions.length ? scoreFrom(patient.conditions.map((item) => item.display), 8, 38) : 3;
-  const allergyRisk = patient.allergies.some((allergy) => clean(allergy.display).includes(clean(consultation.candidateGeneric))) ? 90 : patient.allergies.length ? 12 : 2;
-  const overallRisk = Math.max(ddiRisk, diseaseRisk, allergyRisk);
+  const overallRisk = Math.max(ddiRisk, diseaseRisk);
   const confidence = scoreFrom({ consultation: consultation.id, type: "confidence" }, 68, 94);
-  const interval = Math.max(3, Math.round((100 - confidence) / 2));
+  const intervalWidth = Math.max(3, Math.round((100 - confidence) / 2));
+  const confidenceInterval = { lower: Math.max(0, confidence - intervalWidth), upper: Math.min(100, confidence + intervalWidth) };
+  const uncertainty = {
+    confidence,
+    interval: confidenceInterval,
+    label: reliability(confidence),
+    status: "DEVELOPMENT_PLACEHOLDER_NOT_CONFORMAL",
+    explanation: "This hash-derived display value is not calibrated confidence, a prediction interval, or conformal prediction.",
+  };
+
   return {
     status: "DEMONSTRATION_ONLY",
+    dataStatus: "PARTIALLY_IMPLEMENTED_DEMONSTRATION",
     disclaimer: "This deterministic demonstration result is not clinically validated and must not be used for patient care.",
     engineVersion: ENGINE_VERSION,
     assessedAt: new Date().toISOString(),
-    drugDrug: { riskPercentage: ddiRisk, category: category(ddiRisk), findings: interactionFindings, explanations: interactionFindings.length ? interactionFindings.map((f) => f.reason) : ["No demonstration interaction rule matched the active medication list."] },
-    drugDisease: { riskPercentage: diseaseRisk, category: category(diseaseRisk), explanations: patient.conditions.length ? ["Demonstration-only disease context check; authoritative contraindication knowledge is not installed."] : ["No active conditions are recorded."] },
-    drugAllergy: { riskPercentage: allergyRisk, category: category(allergyRisk), explanations: allergyRisk >= 90 ? ["The recorded allergy text overlaps with the candidate medicine; do not rely on this text match for clinical care."] : ["Demonstration-only allergy context check; authoritative allergy reconciliation is not installed."] },
-    overall: { riskPercentage: overallRisk, category: category(overallRisk) },
-    conformalReliability: { confidence, interval: { lower: Math.max(0, confidence - interval), upper: Math.min(100, confidence + interval) }, label: reliability(confidence) },
+    drugDrug: {
+      riskPercentage: ddiRisk,
+      interactionSeverity: category(ddiRisk),
+      category: category(ddiRisk),
+      findings: interactionFindings,
+      confidence: uncertainty.confidence,
+      confidenceInterval,
+      reliability: uncertainty.label,
+      uncertaintyStatus: uncertainty.status,
+      explanations: interactionFindings.length
+        ? interactionFindings.map((finding) => finding.reason)
+        : ["No static demonstration interaction rule matched the active medication list; the displayed low risk is a development placeholder, not a negative interaction finding."],
+      knowledgeSource: clinicalKnowledgeStatus.drugDrug,
+    },
+    drugDisease: {
+      riskPercentage: diseaseRisk,
+      category: category(diseaseRisk),
+      dataStatus: "DEVELOPMENT_PLACEHOLDER",
+      explanations: patient.conditions.length
+        ? ["No drug-disease knowledge dataset is integrated; this display value is a development placeholder."]
+        : ["No active conditions are recorded; no drug-disease knowledge assessment was performed."],
+      knowledgeSource: clinicalKnowledgeStatus.drugDisease,
+    },
+    overall: { riskPercentage: overallRisk, category: category(overallRisk), dataStatus: "DEVELOPMENT_PLACEHOLDER" },
+    conformalReliability: uncertainty,
   };
 };
 
-export const adrPrediction = ({ consultation, patient }) => {
-  const activeCount = patient.medications.filter((item) => item.status === "ACTIVE").length;
-  const risk = Math.min(78, 8 + activeCount * 7 + patient.age / 6 + scoreFrom(consultation.candidateGeneric, 0, 18));
-  const confidence = scoreFrom({ consultation: consultation.id, type: "adr" }, 66, 91);
-  const width = Math.max(3, Math.round((100 - confidence) / 2));
-  return {
-    predictedAdrRisk: Math.round(risk),
-    riskCategory: category(risk),
-    confidence,
-    confidenceInterval: { lower: Math.max(0, Math.round(risk - width)), upper: Math.min(100, Math.round(risk + width)) },
-    predictionStatus: "success",
-    status: "DEMONSTRATION_ONLY",
-    disclaimer: "This deterministic demonstration prediction is not a medical-device model and must not guide treatment.",
-    modelVersion: MODEL_VERSION,
-    generatedAt: new Date().toISOString(),
-    explanations: ["The demonstration calculation uses only age, active-medication count, and candidate-medicine text.", "Disease information is intentionally excluded from this ADR contract.", "A validated, governed model must replace this demonstration result before clinical use."],
-  };
+export const adrPrediction = async (input) => adrPredictionProvider.predict(input);
+
+export const recommendations = ({ consultation, safety, adr }) => rankRecommendations({ consultation, safety, adr });
+
+export const versions = {
+  ENGINE_VERSION,
+  MODEL_VERSION: adrPredictionProvider.modelVersion,
+  MODEL_NAME: adrPredictionProvider.modelName,
+  ADR_PROVIDER_NAME: adrPredictionProvider.providerName,
+  RANKING_CONFIG_ID: recommendationRankingConfig.configId,
 };
 
-const alternatives = ["Paracetamol", "Cetirizine", "Pantoprazole", "Amoxicillin", "Losartan", "Metformin"];
-export const recommendations = ({ consultation, safety, adr }) =>
-  alternatives
-    .filter((drug) => clean(drug) !== clean(consultation.candidateGeneric))
-    .map((drug) => {
-      const riskPct = scoreFrom({ drug, candidate: consultation.candidateGeneric, safety: safety.overall.riskPercentage }, 8, 48);
-      return { drug, rank: 0, riskPct, category: category(riskPct), confidencePct: adr.confidence, intervalLow: Math.max(0, riskPct - 8), intervalHigh: Math.min(100, riskPct + 8), reasons: ["Demonstration-only alternative ranking; formulary and patient-specific suitability are not evaluated.", "Hard clinical exclusions require a validated knowledge base."] };
-    })
-    .sort((a, b) => a.riskPct - b.riskPct)
-    .slice(0, 3)
-    .map((item, index) => ({ ...item, rank: index + 1 }));
-
-export const versions = { ENGINE_VERSION, MODEL_VERSION };
+export { recommendationRankingConfig };

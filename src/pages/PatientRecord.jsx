@@ -13,7 +13,6 @@ import { usePatient } from "../context/PatientContext";
 import { SIDE_EFFECT_TERMS } from "../data/sideEffects";
 import { requestAdrPrediction } from "../services/adrPredictionService";
 import {
-  getDrugAllergyReasons,
   getDrugDiseaseReasons,
   getDDIPredictionReasons,
   getFeedbackUsageReasons,
@@ -351,14 +350,6 @@ function Results({
                 <Metric label="Interaction Risk (%)">42%</Metric>
               </div>
               <ExplainToggle reasons={getDrugDiseaseReasons()} />
-            </section>
-
-            <section className="border-t border-border pt-4 dark:border-slate-700">
-              <h3 className="text-sm font-bold">Drug–Allergy Analysis</h3>
-              <div className="mt-3">
-                <Metric label="Interaction Risk (%)">18%</Metric>
-              </div>
-              <ExplainToggle reasons={getDrugAllergyReasons()} />
             </section>
 
             <section className="rounded-lg border border-primary/20 bg-primary/5 p-4">

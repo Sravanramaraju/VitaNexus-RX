@@ -21,6 +21,16 @@ export const mapMedicationInput = (medication) => ({
 export const mapConditionInput = (condition) => ({ display: condition.display, code: condition.code || null, duration: condition.duration || null, source: condition.source || "clinician-entered" });
 export const mapAllergyInput = (allergy) => ({ display: allergy.display, code: allergy.code || null, severity: allergy.severity || null, reaction: allergy.reaction || null, source: allergy.source || "clinician-entered" });
 
+// Legacy safety snapshots may contain an old demonstration-only drugAllergy field.
+// It remains in historical JSON but is excluded from all active API projections.
+export const activeSafetyResult = (result) => {
+  if (!result) return null;
+  const { drugAllergy, ...currentResult } = result;
+  return drugAllergy
+    ? { ...currentResult, legacyFieldsOmitted: ["drugAllergy"] }
+    : currentResult;
+};
+
 export const patientResponse = (patient) => ({
   id: patient.id,
   publicId: patient.publicId,
@@ -45,7 +55,7 @@ export const consultationResponse = (consultation) => ({
   version: consultation.version,
   createdAt: consultation.createdAt,
   updatedAt: consultation.updatedAt,
-  latestSafetyAssessment: consultation.analyses?.find((item) => item.type === "SAFETY")?.result || null,
+  latestSafetyAssessment: activeSafetyResult(consultation.analyses?.find((item) => item.type === "SAFETY")?.result),
   adrPrediction: consultation.adrPredictions?.[0]?.result || null,
   recommendations: consultation.recommendations?.[0]?.recommendations || null,
   latestNote: consultation.notes?.[0] ? { text: consultation.notes[0].text, updatedAt: consultation.notes[0].updatedAt } : null,

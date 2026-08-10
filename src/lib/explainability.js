@@ -9,10 +9,6 @@ export const getDrugDiseaseReasons = () => [
   'This placeholder assessment represents disease-related safety considerations.',
   'Patient-specific conditions can be incorporated when clinical data is connected.',
 ]
-export const getDrugAllergyReasons = () => [
-  'This placeholder assessment represents documented allergy safety considerations.',
-  'Patient-specific allergy history can be incorporated when clinical data is connected.',
-]
 export const getOverallClinicalRiskReasons = () => [
   'Overall clinical risk summarizes the currently available safety signals.',
   'Additional patient-specific inputs can refine this assessment when connected.',

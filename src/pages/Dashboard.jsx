@@ -8,7 +8,7 @@ import { AlertDialog } from '../components/ui/alert-dialog'
 
 const patientStatus = (patient) => patient.visits.some((visit) => visit.status === 'in-progress') ? 'Active' : 'Completed'
 const date = (value) => new Date(value).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
-const dataToText = (entries) => entries.map(({ name, detail, brand, generic, drugName, dosage, frequency, activeStatus }) => name ? `${name} | ${detail}` : `${drugName || brand} | ${dosage || generic || ''} | ${frequency || ''} | ${activeStatus || 'active'}`).join('\n')
+const dataToText = (entries) => entries.map(({ name, detail, severity, brand, generic, drugName, dosage, frequency, activeStatus }) => name ? `${name} | ${detail || severity || 'Not specified'}` : `${drugName || brand} | ${dosage || generic || ''} | ${frequency || ''} | ${activeStatus || 'active'}`).join('\n')
 
 function PatientRecordModal({ patient, onClose }) {
   const profile = [["Diseases", dataToText(patient.diseases)], ["Allergies", dataToText(patient.allergies)], ["Current medications", dataToText(patient.currentMedications)]];
