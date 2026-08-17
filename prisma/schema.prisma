@@ -25,19 +25,19 @@ enum MedicationStatus {
 }
 
 model Clinician {
-  id              String       @id @default(uuid())
-  email           String       @unique
+  id              String         @id @default(uuid())
+  email           String         @unique
   passwordHash    String
   name            String
   phone           String?
   gender          String?
   specialty       String?
   practiceSetting String?
-  role            UserRole     @default(CLINICIAN)
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  role            UserRole       @default(CLINICIAN)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
   patients        Patient[]
-  consultations  Consultation[]
+  consultations   Consultation[]
   notes           DoctorNote[]
   followUps       FollowUp[]
   drafts          IntakeDraft[]
@@ -45,160 +45,168 @@ model Clinician {
 }
 
 model Patient {
-  id              String              @id @default(uuid())
-  publicId        String              @unique
-  clinicianId     String
-  clinician       Clinician           @relation(fields: [clinicianId], references: [id])
-  name            String
-  age             Int
-  gender          String
-  version         Int                 @default(1)
-  deletedAt       DateTime?
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
-  conditions      PatientCondition[]
-  allergies       PatientAllergy[]
-  medications     PatientMedication[]
-  consultations   Consultation[]
-  drafts          IntakeDraft[]
+  id            String              @id @default(uuid())
+  publicId      String              @unique
+  clinicianId   String
+  clinician     Clinician           @relation(fields: [clinicianId], references: [id])
+  name          String
+  age           Int
+  gender        String
+  version       Int                 @default(1)
+  deletedAt     DateTime?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  conditions    PatientCondition[]
+  allergies     PatientAllergy[]
+  medications   PatientMedication[]
+  consultations Consultation[]
+  drafts        IntakeDraft[]
 
   @@index([clinicianId, deletedAt])
   @@index([clinicianId, name])
 }
 
 model PatientCondition {
-  id          String   @id @default(uuid())
-  patientId   String
-  patient     Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  display     String
-  code        String?
-  duration    String?
-  source      String   @default("clinician-entered")
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(uuid())
+  patientId String
+  patient   Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  display   String
+  code      String?
+  duration  String?
+  source    String   @default("clinician-entered")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model PatientAllergy {
-  id          String   @id @default(uuid())
-  patientId   String
-  patient     Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  display     String
-  code        String?
-  severity    String?
-  reaction    String?
-  source      String   @default("clinician-entered")
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(uuid())
+  patientId String
+  patient   Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  display   String
+  code      String?
+  severity  String?
+  reaction  String?
+  source    String   @default("clinician-entered")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model PatientMedication {
-  id          String           @id @default(uuid())
-  patientId   String
-  patient     Patient          @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  brand       String?
-  genericName String
-  dosage      String?
-  frequency   String?
-  route       String?
-  status      MedicationStatus @default(ACTIVE)
-  source      String           @default("clinician-entered")
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  id             String           @id @default(uuid())
+  patientId      String
+  patient        Patient          @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  brand          String?
+  genericName    String
+  dosage         String?
+  frequency      String?
+  route          String?
+  status         MedicationStatus @default(ACTIVE)
+  source         String           @default("clinician-entered")
+  enteredName    String?
+  normalizedName String?
+  mappingSource  String?
+  mappingVersion String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
 
   @@index([patientId, status])
 }
 
 model Consultation {
-  id              String             @id @default(uuid())
-  patientId       String
-  patient         Patient            @relation(fields: [patientId], references: [id])
-  clinicianId     String
-  clinician       Clinician          @relation(fields: [clinicianId], references: [id])
-  indication      String
-  candidateBrand  String?
-  candidateGeneric String
-  dosage          String
-  frequency       String
-  route           String?
-  status          ConsultationStatus @default(IN_PROGRESS)
-  version         Int                @default(1)
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
-  analyses        ClinicalAnalysis[]
-  adrPredictions  AdrPrediction[]
-  recommendations RecommendationSet[]
-  notes           DoctorNote[]
-  followUps       FollowUp[]
+  id                      String              @id @default(uuid())
+  patientId               String
+  patient                 Patient             @relation(fields: [patientId], references: [id])
+  clinicianId             String
+  clinician               Clinician           @relation(fields: [clinicianId], references: [id])
+  indication              String
+  candidateBrand          String?
+  candidateGeneric        String
+  candidateEnteredName    String?
+  candidateNormalizedName String?
+  candidateMappingSource  String?
+  candidateMappingVersion String?
+  dosage                  String
+  frequency               String
+  route                   String?
+  status                  ConsultationStatus  @default(IN_PROGRESS)
+  version                 Int                 @default(1)
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
+  analyses                ClinicalAnalysis[]
+  adrPredictions          AdrPrediction[]
+  recommendations         RecommendationSet[]
+  notes                   DoctorNote[]
+  followUps               FollowUp[]
 
   @@index([patientId, createdAt])
   @@index([clinicianId, status])
 }
 
 model ClinicalAnalysis {
-  id               String       @id @default(uuid())
-  consultationId   String
-  consultation     Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
-  type             String
-  result           Json
-  engineVersion    String
-  inputHash        String
-  createdAt        DateTime     @default(now())
+  id             String       @id @default(uuid())
+  consultationId String
+  consultation   Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
+  type           String
+  result         Json
+  engineVersion  String
+  inputHash      String
+  createdAt      DateTime     @default(now())
 
   @@unique([consultationId, type, engineVersion])
 }
 
 model AdrPrediction {
-  id               String       @id @default(uuid())
-  consultationId   String
-  consultation     Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
-  result           Json
-  modelVersion     String
-  inputHash        String
-  createdAt        DateTime     @default(now())
+  id             String       @id @default(uuid())
+  consultationId String
+  consultation   Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
+  result         Json
+  modelVersion   String
+  inputHash      String
+  createdAt      DateTime     @default(now())
 
   @@unique([consultationId, modelVersion, inputHash])
 }
 
 model RecommendationSet {
-  id               String       @id @default(uuid())
-  consultationId   String
-  consultation     Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
-  recommendations  Json
-  engineVersion    String
-  inputHash        String
-  createdAt        DateTime     @default(now())
+  id              String       @id @default(uuid())
+  consultationId  String
+  consultation    Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
+  recommendations Json
+  engineVersion   String
+  inputHash       String
+  createdAt       DateTime     @default(now())
 
   @@unique([consultationId, engineVersion, inputHash])
 }
 
 model DoctorNote {
-  id               String       @id @default(uuid())
-  consultationId   String
-  consultation     Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
-  authorId         String
-  author           Clinician    @relation(fields: [authorId], references: [id])
-  text             String
-  version          Int          @default(1)
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
+  id             String       @id @default(uuid())
+  consultationId String
+  consultation   Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
+  authorId       String
+  author         Clinician    @relation(fields: [authorId], references: [id])
+  text           String
+  version        Int          @default(1)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   @@index([consultationId, updatedAt])
 }
 
 model FollowUp {
-  id               String       @id @default(uuid())
-  consultationId   String
-  consultation     Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
-  authorId         String
-  author           Clinician    @relation(fields: [authorId], references: [id])
-  adverseEvent     String
-  eventCode        String?
-  severity         String
-  durationDays     Int?
-  notes            String?
-  createdAt        DateTime     @default(now())
+  id             String       @id @default(uuid())
+  consultationId String
+  consultation   Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
+  authorId       String
+  author         Clinician    @relation(fields: [authorId], references: [id])
+  adverseEvent   String
+  eventCode      String?
+  severity       String
+  durationDays   Int?
+  notes          String?
+  createdAt      DateTime     @default(now())
 }
 
 model IntakeDraft {
@@ -217,27 +225,94 @@ model IntakeDraft {
 }
 
 model MedicationTerminology {
-  id        String   @id @default(uuid())
-  brand     String
-  generic   String
-  source    String   @default("VitaNexus prototype OTC mapping")
-  version   String   @default("2026.08")
-  createdAt DateTime @default(now())
+  id                String   @id @default(uuid())
+  brand             String
+  generic           String
+  normalizedBrand   String   @default("")
+  normalizedGeneric String   @default("")
+  source            String   @default("VitaNexus prototype OTC mapping")
+  version           String   @default("2026.08")
+  createdAt         DateTime @default(now())
 
   @@unique([brand, generic])
   @@index([brand])
+  @@index([normalizedBrand])
+  @@index([normalizedGeneric])
+}
+
+model DrugInteractionKnowledge {
+  id              String   @id @default(uuid())
+  drugA           String
+  normalizedDrugA String
+  ddinterIdA      String?
+  drugB           String
+  normalizedDrugB String
+  ddinterIdB      String?
+  rawSeverity     String
+  displaySeverity String
+  source          String
+  datasetVersion  String
+  importedAt      DateTime @default(now())
+
+  @@unique([normalizedDrugA, normalizedDrugB, source, datasetVersion])
+  @@index([normalizedDrugA])
+  @@index([normalizedDrugB])
+}
+
+model DrugDiseaseKnowledge {
+  id                    String   @id @default(uuid())
+  genericDrug           String
+  normalizedDrug        String
+  existingDisease       String
+  normalizedDisease     String
+  diseaseIdentity       String   @default("")
+  conceptName           String   @default("")
+  normalizedConceptName String   @default("")
+  umlsCui               String?
+  snomedName            String?
+  normalizedSnomedName  String   @default("")
+  relationship          String
+  assessment            String
+  evidence              String?
+  source                String
+  datasetVersion        String
+  importedAt            DateTime @default(now())
+
+  @@unique([normalizedDrug, normalizedDisease, relationship, source, datasetVersion])
+  @@index([normalizedDrug])
+  @@index([normalizedDisease])
+  @@index([diseaseIdentity])
+  @@index([umlsCui])
+  @@index([normalizedConceptName])
+  @@index([normalizedSnomedName])
+}
+
+model DrugIndicationKnowledge {
+  id                   String   @id @default(uuid())
+  indication           String
+  normalizedIndication String
+  genericDrug          String
+  normalizedDrug       String
+  relationship         String
+  evidence             String?
+  source               String
+  datasetVersion       String
+  importedAt           DateTime @default(now())
+
+  @@unique([normalizedIndication, normalizedDrug, relationship, source, datasetVersion])
+  @@index([normalizedIndication])
 }
 
 model AuditEvent {
-  id          String    @id @default(uuid())
-  actorId     String?
-  actor       Clinician? @relation(fields: [actorId], references: [id])
-  action      String
-  entityType  String
-  entityId    String
-  requestId   String
-  metadata    Json?
-  createdAt   DateTime  @default(now())
+  id         String     @id @default(uuid())
+  actorId    String?
+  actor      Clinician? @relation(fields: [actorId], references: [id])
+  action     String
+  entityType String
+  entityId   String
+  requestId  String
+  metadata   Json?
+  createdAt  DateTime   @default(now())
 
   @@index([entityType, entityId])
   @@index([actorId, createdAt])

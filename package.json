@@ -4,7 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/startDevelopment.js",
+    "dev:web": "vite",
     "dev:api": "node --watch server/index.js",
     "build": "vite build",
     "lint": "eslint .",
@@ -14,7 +15,11 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
-    "db:seed": "node prisma/seed.js"
+    "db:seed": "node prisma/seed.js",
+    "data:process": "node scripts/processKnowledgeDatasets.js && node scripts/processDrugcentralKnowledge.js",
+    "data:process:core": "node scripts/processKnowledgeDatasets.js",
+    "data:process:drugcentral": "node scripts/processDrugcentralKnowledge.js",
+    "data:import": "node scripts/importClinicalKnowledge.js"
   },
   "dependencies": {
     "@prisma/client": "^6.19.0",

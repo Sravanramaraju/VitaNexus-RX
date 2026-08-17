@@ -1,85 +1,89 @@
-import { stableHash } from "../utils.js";
-import { clinicalKnowledgeStatus, findPairwiseDrugInteraction } from "../repositories/clinicalKnowledgeRepository.js";
+import { ddinterSearchTerms, highestDdiSeverity, highestDiseaseAssessment } from "../repositories/clinicalKnowledgeRepository.js";
 import { adrPredictionProvider } from "./adrPredictionProvider.js";
 import { rankRecommendations, recommendationRankingConfig } from "./recommendationRankingService.js";
 
-const ENGINE_VERSION = "vitanexus-demo-rules-1.2.0";
-const scoreFrom = (value, min = 0, max = 100) => {
-  const hex = stableHash(value).slice(0, 8);
-  return min + (Number.parseInt(hex, 16) % (max - min + 1));
+const ENGINE_VERSION = "vitanexus-knowledge-2.2.0";
+const overallAssessment = (ddiSeverity, diseaseAssessment) => {
+  if (ddiSeverity === "MAJOR" || diseaseAssessment === "HIGH") return "HIGH";
+  if (ddiSeverity === "MODERATE" || diseaseAssessment === "MODERATE") return "MODERATE";
+  if (ddiSeverity === "MINOR" || diseaseAssessment === "LOW") return "LOW";
+  return "NOT_EVALUATED";
 };
-const category = (score) => (score >= 61 ? "High" : score >= 31 ? "Moderate" : "Low");
-const reliability = (confidence) => (confidence >= 85 ? "High" : confidence >= 65 ? "Moderate" : "Low");
 
-export const clinicalSafetyAssessment = ({ consultation, patient }) => {
+// Allergies deliberately are not accepted here. They remain part of the patient record
+// for clinician review, but are not an automated clinical-engine input.
+export const clinicalSafetyAssessment = async ({ consultation, patient, knowledgeRepository }) => {
   const activeMedicines = patient.medications.filter((medicine) => medicine.status === "ACTIVE");
-  const interactionFindings = activeMedicines
-    .map((medicine) => {
-      const rule = findPairwiseDrugInteraction(consultation.candidateGeneric, medicine.genericName);
-      return rule && {
-        medication: medicine.genericName,
-        riskPercentage: rule.riskPercentage,
-        interactionSeverity: rule.interactionSeverity,
-        reason: rule.explanation,
-        source: rule.source,
-        datasetVersion: rule.datasetVersion,
-        dataStatus: rule.dataStatus,
+  const evaluatedPairs = activeMedicines.map((medicine) => ({
+    proposedDrug: consultation.candidateGeneric,
+    proposedDatasetTerms: ddinterSearchTerms(consultation.candidateGeneric),
+    existingMedication: medicine.genericName,
+    existingDatasetTerms: ddinterSearchTerms(medicine.genericName),
+  }));
+  const interactionFindings = (await Promise.all(
+    activeMedicines.map(async (medicine) => {
+      const relationship = await knowledgeRepository.findPairwiseDrugInteraction(consultation.candidateGeneric, medicine.genericName);
+      return relationship && {
+        existingMedication: medicine.genericName,
+        proposedDrug: consultation.candidateGeneric,
+        ...relationship,
       };
-    })
-    .filter(Boolean);
-  const ddiRisk = interactionFindings.length
-    ? Math.max(...interactionFindings.map((finding) => finding.riskPercentage))
-    : scoreFrom({ candidate: consultation.candidateGeneric, activeMedicines: activeMedicines.map((medicine) => medicine.genericName) }, 4, 25);
-  const diseaseRisk = patient.conditions.length ? scoreFrom(patient.conditions.map((item) => item.display), 8, 38) : 3;
-  const overallRisk = Math.max(ddiRisk, diseaseRisk);
-  const confidence = scoreFrom({ consultation: consultation.id, type: "confidence" }, 68, 94);
-  const intervalWidth = Math.max(3, Math.round((100 - confidence) / 2));
-  const confidenceInterval = { lower: Math.max(0, confidence - intervalWidth), upper: Math.min(100, confidence + intervalWidth) };
-  const uncertainty = {
-    confidence,
-    interval: confidenceInterval,
-    label: reliability(confidence),
-    status: "DEVELOPMENT_PLACEHOLDER_NOT_CONFORMAL",
-    explanation: "This hash-derived display value is not calibrated confidence, a prediction interval, or conformal prediction.",
-  };
+    }),
+  )).filter(Boolean);
+  const diseaseEvaluation = await knowledgeRepository.findDrugDiseaseAssessments(consultation.candidateGeneric, patient.conditions);
+  const diseaseFindings = Array.isArray(diseaseEvaluation) ? diseaseEvaluation : diseaseEvaluation.findings;
+  const diseaseResolutions = Array.isArray(diseaseEvaluation) ? [] : diseaseEvaluation.resolutions;
+  const ddiSeverity = highestDdiSeverity(interactionFindings.map((finding) => finding.displaySeverity));
+  const diseaseAssessment = highestDiseaseAssessment(diseaseFindings.map((finding) => finding.assessment));
 
   return {
-    status: "DEMONSTRATION_ONLY",
-    dataStatus: "PARTIALLY_IMPLEMENTED_DEMONSTRATION",
-    disclaimer: "This deterministic demonstration result is not clinically validated and must not be used for patient care.",
+    status: "DATASET_BACKED_WHEN_MATCHED",
+    dataStatus: interactionFindings.length || diseaseFindings.length ? "DATASET_MATCHED" : "NO_DATASET_MATCH",
+    disclaimer: "Dataset relationships support clinical review and are not patient-specific probabilities or a substitute for professional judgement.",
     engineVersion: ENGINE_VERSION,
     assessedAt: new Date().toISOString(),
     drugDrug: {
-      riskPercentage: ddiRisk,
-      interactionSeverity: category(ddiRisk),
-      category: category(ddiRisk),
+      severity: ddiSeverity,
       findings: interactionFindings,
-      confidence: uncertainty.confidence,
-      confidenceInterval,
-      reliability: uncertainty.label,
-      uncertaintyStatus: uncertainty.status,
+      evaluatedPairs,
+      source: "DDInter 2.0",
+      dataStatus: interactionFindings.length ? "DATASET_MATCHED" : "NO_DATASET_MATCH",
       explanations: interactionFindings.length
-        ? interactionFindings.map((finding) => finding.reason)
-        : ["No static demonstration interaction rule matched the active medication list; the displayed low risk is a development placeholder, not a negative interaction finding."],
-      knowledgeSource: clinicalKnowledgeStatus.drugDrug,
+        ? interactionFindings.map((finding) => `${finding.drugA} + ${finding.drugB}: ${finding.rawSeverity} (${finding.source}).`)
+        : evaluatedPairs.length
+          ? evaluatedPairs.map((pair) => `No DDInter 2.0 record for ${pair.proposedDatasetTerms.join(" / ")} + ${pair.existingDatasetTerms.join(" / ")}.`)
+          : ["No active medicines were available for a DDInter 2.0 check."],
     },
     drugDisease: {
-      riskPercentage: diseaseRisk,
-      category: category(diseaseRisk),
-      dataStatus: "DEVELOPMENT_PLACEHOLDER",
-      explanations: patient.conditions.length
-        ? ["No drug-disease knowledge dataset is integrated; this display value is a development placeholder."]
-        : ["No active conditions are recorded; no drug-disease knowledge assessment was performed."],
-      knowledgeSource: clinicalKnowledgeStatus.drugDisease,
+      assessment: diseaseAssessment,
+      findings: diseaseFindings,
+      conditionResolutions: diseaseResolutions,
+      source: "DrugCentral",
+      dataStatus: diseaseFindings.length ? "DATASET_MATCHED" : "NO_DATASET_MATCH",
+      explanations: diseaseFindings.length
+        ? diseaseFindings.map((finding) => `Entered condition: ${finding.enteredCondition} → resolved DrugCentral term: ${finding.resolvedDisease} (${finding.diseaseIdentity}) → DrugCentral relationship: ${finding.relationship} → assessment: ${finding.assessment}. Source: ${finding.source} ${finding.datasetVersion}.`)
+        : diseaseResolutions.length
+          ? diseaseResolutions.map((resolution) => resolution.status === "RESOLVED"
+            ? `Entered condition: ${resolution.enteredCondition} → resolved DrugCentral term: ${resolution.resolvedDisease} (${resolution.diseaseIdentity}), but no DrugCentral relationship was found for the proposed drug.`
+            : `Entered condition: ${resolution.enteredCondition} could not be deterministically resolved to a DrugCentral disease identity; no relationship was claimed.`)
+          : ["No active patient conditions were available for a DrugCentral drug-disease check."],
     },
-    overall: { riskPercentage: overallRisk, category: category(overallRisk), dataStatus: "DEVELOPMENT_PLACEHOLDER" },
-    conformalReliability: uncertainty,
+    overall: {
+      assessment: overallAssessment(ddiSeverity, diseaseAssessment),
+      dataStatus: interactionFindings.length || diseaseFindings.length ? "DATASET_MATCHED" : "NO_DATASET_MATCH",
+      explanation: "An ordinal synthesis of DDInter severity and DrugCentral drug-disease assessment; it is not a probability or percentage.",
+    },
+    conformalReliability: {
+      status: "NOT_IMPLEMENTED",
+      explanation: "No calibrated confidence, prediction interval, or conformal reliability measure is produced by this clinical-safety workflow.",
+    },
   };
 };
 
 export const adrPrediction = async (input) => adrPredictionProvider.predict(input);
 
-export const recommendations = ({ consultation, safety, adr }) => rankRecommendations({ consultation, safety, adr });
+export const recommendations = async ({ consultation, patient, knowledgeRepository }) =>
+  rankRecommendations({ consultation, patient, knowledgeRepository });
 
 export const versions = {
   ENGINE_VERSION,

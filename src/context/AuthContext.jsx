@@ -1,26 +1,26 @@
-import { createContext, useContext, useState } from 'react'
-import { getCurrentDoctor, getDoctors, saveDoctors, setCurrentDoctor } from '../lib/storage'
+import { createContext, useContext, useEffect, useState } from 'react'
+import { api, apiJson, getAccessToken, setAccessToken } from '../lib/api'
 
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
-  const [doctor, setDoctor] = useState(getCurrentDoctor())
+  const [doctor, setDoctor] = useState(null)
+  useEffect(() => {
+    const clearSession = () => { setAccessToken(null); setDoctor(null); };
+    window.addEventListener("vitanexus-auth-invalid", clearSession);
+    if (getAccessToken()) api('/auth/me').then(setDoctor).catch(clearSession);
+    return () => window.removeEventListener("vitanexus-auth-invalid", clearSession);
+  }, [])
 
-  const register = (name, email, password, profile = {}) => {
-    const doctors = getDoctors()
-    if (doctors.some((item) => item.email.toLowerCase() === email.toLowerCase())) throw new Error('Email already registered')
-    if (!/^[A-Za-z][A-Za-z .'-]*$/.test(name.trim())) throw new Error('Name can contain letters, spaces, periods, apostrophes, and hyphens only')
-    if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password) || !/[^A-Za-z0-9]/.test(password)) throw new Error('Password does not meet the required format')
-    const newDoctor = { id: crypto.randomUUID(), name: name.trim(), email, password, ...profile }
-    saveDoctors([...doctors, newDoctor]); setCurrentDoctor(newDoctor); setDoctor(newDoctor)
-    return newDoctor
+  const register = async (name, email, password, profile = {}) => {
+    const result = await apiJson('/auth/register', 'POST', { name, email, password, ...profile })
+    setAccessToken(result.accessToken); setDoctor(result.clinician); return result.clinician
   }
-  const login = (email, password) => {
-    const matched = getDoctors().find((item) => item.email.toLowerCase() === email.toLowerCase() && item.password === password)
-    if (!matched) throw new Error('Invalid credentials')
-    setCurrentDoctor(matched); setDoctor(matched); return matched
+  const login = async (email, password) => {
+    const result = await apiJson('/auth/login', 'POST', { email, password })
+    setAccessToken(result.accessToken); setDoctor(result.clinician); return result.clinician
   }
-  const logout = () => { setCurrentDoctor(null); setDoctor(null) }
+  const logout = async () => { try { await apiJson('/auth/logout', 'POST', {}) } finally { setAccessToken(null); setDoctor(null) } }
 
   return <AuthContext.Provider value={{ doctor, register, login, logout }}>{children}</AuthContext.Provider>
 }

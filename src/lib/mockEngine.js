@@ -1,27 +1,29 @@
 import { getRankingReasons } from './explainability'
 
-const randomInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min
 const alternatives = ['Azithromycin', 'Amoxicillin', 'Cetirizine', 'Metformin', 'Losartan', 'Pantoprazole', 'Levosalbutamol', 'Doxycycline']
+const choose = (values) => values[Math.floor(Math.random() * values.length)]
 
+// Local presentation fixtures intentionally use ordinal labels only. Production
+// data comes from DDInter 2.0 / DrugCentral through the backend API.
 export function generateRiskResult() {
-  const score = randomInt(10, 85)
-  return { score, severity: score > 60 ? 'Severe' : score > 30 ? 'Moderate' : 'Mild', breakdown: { pharmacodynamic: randomInt(15, 90), pharmacokinetic: randomInt(10, 75) } }
+  return { severity: choose(['MAJOR', 'MODERATE', 'MINOR']), source: 'DDInter 2.0 (pending API lookup)' }
 }
 
 export function generateConfidence() {
-  const pct = randomInt(40, 98)
-  const halfWidth = Math.max(2, Math.round((100 - pct) * 0.42))
-  return { pct, intervalLow: Math.max(0, pct - halfWidth), intervalHigh: Math.min(100, pct + halfWidth), reliabilityLabel: pct > 85 ? 'Very High' : pct > 65 ? 'High' : pct > 45 ? 'Moderate' : 'Low' }
+  return { status: 'NOT_IMPLEMENTED' }
 }
 
 export function generateRecommendations(count = Math.random() > 0.5 ? 2 : 3) {
-  return [...alternatives].sort(() => Math.random() - 0.5).slice(0, count).map((drug) => {
-    const risk = generateRiskResult(); const confidence = generateConfidence()
-    return { drug, riskPct: risk.score, confidencePct: confidence.pct, intervalLow: confidence.intervalLow, intervalHigh: confidence.intervalHigh, reasons: getRankingReasons() }
-  }).sort((a, b) => a.riskPct - b.riskPct)
+  return [...alternatives].sort(() => Math.random() - 0.5).slice(0, count).map((drug, index) => ({
+    drug,
+    rank: index + 1,
+    assessment: 'NOT_EVALUATED',
+    source: 'DrugCentral (pending API lookup)',
+    reasons: getRankingReasons(),
+  }))
 }
 
 export function generateUpdatedRecommendations(feedback, previousRecommendations = []) {
-  const effect = (feedback?.sideEffect || '').toLowerCase()
-  return previousRecommendations.map((item) => ({ ...item, riskPct: Math.min(95, Math.max(5, item.riskPct + (item.drug.toLowerCase().includes(effect) ? 25 : randomInt(-12, 8)))), reasons: [...getRankingReasons().slice(0, 3), 'Ranking was updated after physician feedback.'] })).sort((a, b) => a.riskPct - b.riskPct)
+  void feedback
+  return previousRecommendations.map((item, index) => ({ ...item, rank: index + 1, reasons: [...getRankingReasons().slice(0, 3), 'List was refreshed after physician feedback; no allergy data was used.'] }))
 }

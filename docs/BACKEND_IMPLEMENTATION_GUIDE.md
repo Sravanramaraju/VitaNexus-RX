@@ -1,5 +1,7 @@
 # VitaNexus-RX Backend Implementation Guide
 
+> **Current implementation notice:** This setup guide predates the complete dataset pipeline. Use [CURRENT_SYSTEM_ARCHITECTURE.md](CURRENT_SYSTEM_ARCHITECTURE.md) for the authoritative current system behavior and [DATASET_INTEGRATION.md](DATASET_INTEGRATION.md) for source processing/import commands. The active safety and recommendation flow is DDInter + DrugCentral; it does not use ML/FAERS outputs.
+
 ## Status and scope
 
 This repository now contains a runnable REST backend for the VitaNexus-RX clinician workflow. It uses Express, PostgreSQL, Prisma, Zod validation, bcrypt password hashing, and signed JWT access tokens. It is structured for a B.Tech/IEEE-style project demonstration and separates persistence, API orchestration, terminology, audit logging, and future clinical-engine integration.

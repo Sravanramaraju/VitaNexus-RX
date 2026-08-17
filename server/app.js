@@ -15,12 +15,23 @@ import { clinicalSafetyAssessment, adrPrediction, recommendationRankingConfig, r
 import { buildAdrPredictionInput } from "./services/adrPredictionProvider.js";
 import { activeSafetyResult, consultationResponse, mapAllergyInput, mapConditionInput, mapMedicationInput, patientInclude, patientResponse } from "./repository.js";
 import { buildRecommendationInput } from "./services/recommendationRankingService.js";
+import { createClinicalKnowledgeRepository } from "./repositories/clinicalKnowledgeRepository.js";
+import { resolveDrug } from "./services/drugResolver.js";
 
 const asyncRoute = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
 const tokenFor = (clinician) => jwt.sign({ role: clinician.role }, config.jwtSecret, { subject: clinician.id, expiresIn: config.jwtExpiresIn });
 const send = (res, status, data, requestId) => res.status(status).json({ data, requestId });
 const forbidden = () => Object.assign(new Error("You do not have access to this record."), { status: 404, code: "NOT_FOUND" });
 const conflict = () => Object.assign(new Error("The record has changed. Refresh it and retry your update."), { status: 409, code: "VERSION_CONFLICT" });
+const knowledgeRepository = createClinicalKnowledgeRepository(prisma);
+const resolveMedication = async (medication) => {
+  const resolved = await resolveDrug(prisma, { enteredName: medication.brand || medication.genericName, brand: medication.brand, genericName: medication.genericName });
+  return { ...medication, brand: resolved.brand, genericName: resolved.genericName, enteredName: resolved.enteredName, normalizedName: resolved.normalizedName, mappingSource: resolved.mappingSource, mappingVersion: resolved.mappingVersion };
+};
+const resolveConsultationDrug = async (consultation) => {
+  const resolved = await resolveDrug(prisma, { enteredName: consultation.candidateBrand || consultation.candidateGeneric, brand: consultation.candidateBrand, genericName: consultation.candidateGeneric });
+  return { ...consultation, candidateBrand: resolved.brand, candidateGeneric: resolved.genericName, candidateEnteredName: resolved.enteredName, candidateNormalizedName: resolved.normalizedName, candidateMappingSource: resolved.mappingSource, candidateMappingVersion: resolved.mappingVersion };
+};
 
 const getPatient = async (client, clinicianId, id, include = patientInclude) => {
   const patient = await client.patient.findFirst({ where: { id, clinicianId, deletedAt: null }, ...(include ? { include } : {}) });
@@ -39,12 +50,13 @@ const getConsultation = async (client, clinicianId, id, includePatient = true) =
 const replaceProfileCollection = async (req, res, entity, schema, mapper) => {
   const body = profileSchema.parse(req.body);
   const items = body.items.map((item) => schema.parse(item));
+  const mappedItems = entity === "medications" ? await Promise.all(items.map(resolveMedication)) : items;
   const patient = await getPatient(prisma, req.auth.clinicianId, req.params.patientId, false);
   if (body.expectedVersion && patient.version !== body.expectedVersion) throw conflict();
   const relation = entity === "conditions" ? "conditions" : entity === "allergies" ? "allergies" : "medications";
   const result = await prisma.$transaction(async (tx) => {
     await tx[entity === "conditions" ? "patientCondition" : entity === "allergies" ? "patientAllergy" : "patientMedication"].deleteMany({ where: { patientId: patient.id } });
-    await tx.patient.update({ data: { [relation]: { create: items.map(mapper) }, version: { increment: 1 } }, where: { id: patient.id } });
+    await tx.patient.update({ data: { [relation]: { create: mappedItems.map(mapper) }, version: { increment: 1 } }, where: { id: patient.id } });
     const updated = await getPatient(tx, req.auth.clinicianId, patient.id);
     await audit(tx, { actorId: req.auth.clinicianId, action: `PATIENT_${entity.toUpperCase()}_REPLACED`, entityType: "Patient", entityId: patient.id, requestId: req.requestId, metadata: { count: items.length } });
     return updated;
@@ -104,7 +116,8 @@ export const createApp = () => {
     const input = patientCreateSchema.parse(req.body);
     const patient = await prisma.$transaction(async (tx) => {
       const number = await tx.patient.count({ where: { clinicianId: req.auth.clinicianId } }) + 1;
-      const created = await tx.patient.create({ data: { clinicianId: req.auth.clinicianId, publicId: `P-${String(number).padStart(4, "0")}-${crypto.randomUUID().slice(0, 4).toUpperCase()}`, name: input.name, age: input.age, gender: input.gender, conditions: { create: input.conditions.map(mapConditionInput) }, allergies: { create: input.allergies.map(mapAllergyInput) }, medications: { create: input.medications.map(mapMedicationInput) } }, include: patientInclude });
+      const resolvedMedications = await Promise.all(input.medications.map(resolveMedication));
+      const created = await tx.patient.create({ data: { clinicianId: req.auth.clinicianId, publicId: `P-${String(number).padStart(4, "0")}-${crypto.randomUUID().slice(0, 4).toUpperCase()}`, name: input.name, age: input.age, gender: input.gender, conditions: { create: input.conditions.map(mapConditionInput) }, allergies: { create: input.allergies.map(mapAllergyInput) }, medications: { create: resolvedMedications.map(mapMedicationInput) } }, include: patientInclude });
       await audit(tx, { actorId: req.auth.clinicianId, action: "PATIENT_CREATED", entityType: "Patient", entityId: created.id, requestId: req.requestId });
       return created;
     });
@@ -119,7 +132,7 @@ export const createApp = () => {
       const data = { ...(input.name !== undefined ? { name: input.name } : {}), ...(input.age !== undefined ? { age: input.age } : {}), ...(input.gender !== undefined ? { gender: input.gender } : {}), version: { increment: 1 } };
       if (input.conditions) data.conditions = { deleteMany: {}, create: input.conditions.map(mapConditionInput) };
       if (input.allergies) data.allergies = { deleteMany: {}, create: input.allergies.map(mapAllergyInput) };
-      if (input.medications) data.medications = { deleteMany: {}, create: input.medications.map(mapMedicationInput) };
+      if (input.medications) { const resolvedMedications = await Promise.all(input.medications.map(resolveMedication)); data.medications = { deleteMany: {}, create: resolvedMedications.map(mapMedicationInput) }; }
       await tx.patient.update({ where: { id: existing.id }, data });
       const updated = await getPatient(tx, req.auth.clinicianId, existing.id);
       await audit(tx, { actorId: req.auth.clinicianId, action: "PATIENT_UPDATED", entityType: "Patient", entityId: existing.id, requestId: req.requestId });
@@ -137,7 +150,7 @@ export const createApp = () => {
   app.put("/api/v1/patients/:patientId/medications", authenticate, asyncRoute((req, res) => replaceProfileCollection(req, res, "medications", medicationSchema, mapMedicationInput)));
 
   app.post("/api/v1/patients/:patientId/consultations", authenticate, asyncRoute(async (req, res) => {
-    const input = consultationSchema.parse(req.body);
+    const input = await resolveConsultationDrug(consultationSchema.parse(req.body));
     const patient = await getPatient(prisma, req.auth.clinicianId, req.params.patientId, false);
     const consultation = await prisma.$transaction(async (tx) => { const created = await tx.consultation.create({ data: { patientId: patient.id, clinicianId: req.auth.clinicianId, ...input } }); await audit(tx, { actorId: req.auth.clinicianId, action: "CONSULTATION_CREATED", entityType: "Consultation", entityId: created.id, requestId: req.requestId }); return created; });
     send(res, 201, consultationResponse(consultation), req.requestId);
@@ -152,7 +165,7 @@ export const createApp = () => {
   app.post("/api/v1/consultations/:consultationId/clinical-safety-assessment", authenticate, asyncRoute(async (req, res) => {
     const consultation = await getConsultation(prisma, req.auth.clinicianId, req.params.consultationId);
     const input = { consultation: { id: consultation.id, candidateGeneric: consultation.candidateGeneric }, patient: consultation.patient };
-    const inputHash = stableHash(input); const result = clinicalSafetyAssessment(input);
+    const inputHash = stableHash(input); const result = await clinicalSafetyAssessment({ ...input, knowledgeRepository });
     const analysis = await prisma.$transaction(async (tx) => { const created = await tx.clinicalAnalysis.upsert({ where: { consultationId_type_engineVersion: { consultationId: consultation.id, type: "SAFETY", engineVersion: versions.ENGINE_VERSION } }, update: { result, inputHash }, create: { consultationId: consultation.id, type: "SAFETY", result, inputHash, engineVersion: versions.ENGINE_VERSION } }); await audit(tx, { actorId: req.auth.clinicianId, action: "SAFETY_ASSESSMENT_GENERATED", entityType: "Consultation", entityId: consultation.id, requestId: req.requestId, metadata: { engineVersion: versions.ENGINE_VERSION } }); return created; });
     send(res, 200, { id: analysis.id, ...result }, req.requestId);
   }));
@@ -166,18 +179,48 @@ export const createApp = () => {
   app.get("/api/v1/consultations/:consultationId/adr-prediction", authenticate, asyncRoute(async (req, res) => { const consultation = await getConsultation(prisma, req.auth.clinicianId, req.params.consultationId); const record = consultation.adrPredictions[0]; if (!record) throw Object.assign(new Error("No ADR prediction has been generated."), { status: 404, code: "PREDICTION_NOT_FOUND" }); send(res, 200, record.result, req.requestId); }));
 
   app.post("/api/v1/consultations/:consultationId/recommendations", authenticate, asyncRoute(async (req, res) => {
-    const consultation = await getConsultation(prisma, req.auth.clinicianId, req.params.consultationId); const storedSafety = consultation.analyses.find((item) => item.type === "SAFETY"); const safety = storedSafety?.engineVersion === versions.ENGINE_VERSION ? activeSafetyResult(storedSafety.result) : clinicalSafetyAssessment({ consultation, patient: consultation.patient }); const adr = consultation.adrPredictions[0]?.result || await adrPrediction(buildAdrPredictionInput({ consultation, patient: consultation.patient })); const inputHash = stableHash(buildRecommendationInput({ consultation, safety, adr })); const result = recommendations({ consultation, safety, adr });
+    const consultation = await getConsultation(prisma, req.auth.clinicianId, req.params.consultationId); const storedSafety = consultation.analyses.find((item) => item.type === "SAFETY"); const safety = storedSafety?.engineVersion === versions.ENGINE_VERSION ? activeSafetyResult(storedSafety.result) : await clinicalSafetyAssessment({ consultation, patient: consultation.patient, knowledgeRepository }); const inputHash = stableHash(buildRecommendationInput({ consultation, patient: consultation.patient, safety })); const result = await recommendations({ consultation, patient: consultation.patient, knowledgeRepository });
     const record = await prisma.$transaction(async (tx) => { const created = await tx.recommendationSet.upsert({ where: { consultationId_engineVersion_inputHash: { consultationId: consultation.id, engineVersion: versions.ENGINE_VERSION, inputHash } }, update: { recommendations: result }, create: { consultationId: consultation.id, recommendations: result, inputHash, engineVersion: versions.ENGINE_VERSION } }); await audit(tx, { actorId: req.auth.clinicianId, action: "RECOMMENDATIONS_GENERATED", entityType: "Consultation", entityId: consultation.id, requestId: req.requestId, metadata: { rankingConfigId: recommendationRankingConfig.configId, weightsStatus: recommendationRankingConfig.weightsStatus } }); return created; });
-    send(res, 200, { id: record.id, status: "DEMONSTRATION_ONLY", disclaimer: "These are not clinically validated treatment alternatives.", ranking: recommendationRankingConfig, recommendations: result }, req.requestId);
+    send(res, 200, { id: record.id, status: "DATASET_BACKED_EVALUATION", disclaimer: "DrugCentral supplies indication candidates. Each candidate is evaluated only against matching DDInter 2.0 and DrugCentral source relationships; no ML or FAERS result is used.", ranking: recommendationRankingConfig, recommendations: result }, req.requestId);
   }));
-  app.get("/api/v1/consultations/:consultationId/recommendations", authenticate, asyncRoute(async (req, res) => { const consultation = await getConsultation(prisma, req.auth.clinicianId, req.params.consultationId); const record = consultation.recommendations[0]; if (!record) throw Object.assign(new Error("No recommendations have been generated."), { status: 404, code: "RECOMMENDATIONS_NOT_FOUND" }); send(res, 200, { status: "DEMONSTRATION_ONLY", disclaimer: "These are not clinically validated treatment alternatives.", ranking: recommendationRankingConfig, recommendations: record.recommendations }, req.requestId); }));
+  app.get("/api/v1/consultations/:consultationId/recommendations", authenticate, asyncRoute(async (req, res) => { const consultation = await getConsultation(prisma, req.auth.clinicianId, req.params.consultationId); const record = consultation.recommendations[0]; if (!record) throw Object.assign(new Error("No recommendations have been generated."), { status: 404, code: "RECOMMENDATIONS_NOT_FOUND" }); send(res, 200, { status: "DATASET_BACKED_EVALUATION", disclaimer: "DrugCentral supplies indication candidates. Each candidate is evaluated only against matching DDInter 2.0 and DrugCentral source relationships; no ML or FAERS result is used.", ranking: recommendationRankingConfig, recommendations: record.recommendations }, req.requestId); }));
 
   app.post("/api/v1/consultations/:consultationId/follow-ups", authenticate, asyncRoute(async (req, res) => { const input = followUpSchema.parse(req.body); const consultation = await getConsultation(prisma, req.auth.clinicianId, req.params.consultationId, false); const followUp = await prisma.$transaction(async (tx) => { const created = await tx.followUp.create({ data: { consultationId: consultation.id, authorId: req.auth.clinicianId, ...input } }); await tx.consultation.update({ where: { id: consultation.id }, data: { status: "COMPLETED", version: { increment: 1 } } }); await audit(tx, { actorId: req.auth.clinicianId, action: "FOLLOW_UP_APPENDED", entityType: "Consultation", entityId: consultation.id, requestId: req.requestId }); return created; }); send(res, 201, followUp, req.requestId); }));
   app.get("/api/v1/consultations/:consultationId/follow-ups", authenticate, asyncRoute(async (req, res) => { const consultation = await getConsultation(prisma, req.auth.clinicianId, req.params.consultationId); send(res, 200, consultation.followUps, req.requestId); }));
 
-  app.get("/api/v1/terminology/medications", authenticate, asyncRoute(async (req, res) => { const q = normalizedText(String(req.query.q || "")); const records = await prisma.medicationTerminology.findMany({ where: q ? { OR: [{ brand: { contains: q, mode: "insensitive" } }, { generic: { contains: q, mode: "insensitive" } }] } : {}, orderBy: { brand: "asc" }, take: Math.min(Number(req.query.limit || 20), 50) }); send(res, 200, { items: records }, req.requestId); }));
-  app.get("/api/v1/terminology/indications", authenticate, (req, res) => send(res, 200, { version: "2026.08", items: ["Pain or fever", "Allergic rhinitis", "Acid reflux", "Hypertension", "Type 2 diabetes", "Bacterial infection"] }, req.requestId));
-  app.get("/api/v1/terminology/conditions", authenticate, (req, res) => send(res, 200, { version: "2026.08", items: ["Hypertension", "Type 2 diabetes", "Asthma", "Chronic kidney disease", "Liver disease"] }, req.requestId));
+  const terminologyLimit = (value) => Math.max(1, Math.min(Number(value || 30), 50));
+  // Dataset search columns are normalized to lowercase. Normalize the clinician's
+  // input in the same way so `Fe`, `fe`, and `FE` always produce the same list.
+  const terminologyQuery = (value) => normalizedText(String(value || "")).toLowerCase();
+  const startsWithPrefix = (value, query) => value.startsWith(query);
+  // Fetch a bounded candidate set then rank the clinician's typed prefix before
+  // partial matches. This keeps one-letter autocomplete useful without loading a
+  // dataset into the browser or relying on an arbitrary alphabetical first page.
+  const rankTerminology = (records, query, fields, limit) => records
+    .sort((first, second) => {
+      const firstRank = Math.min(...fields.map((field) => startsWithPrefix(first[field], query) ? 0 : 1));
+      const secondRank = Math.min(...fields.map((field) => startsWithPrefix(second[field], query) ? 0 : 1));
+      if (firstRank !== secondRank) return firstRank - secondRank;
+      return fields.map((field) => first[field]).join(" ").localeCompare(fields.map((field) => second[field]).join(" "));
+    })
+    .slice(0, limit);
+  const terminologySearch = async (model, where, query, fields, limit) => {
+    const records = await prisma[model].findMany({ where, take: 400 });
+    return query ? rankTerminology(records, query, fields, limit) : records.slice(0, limit);
+  };
+  const prefixFirstSearch = async (model, prefixWhere, containsWhere, query, fields, limit) => {
+    const prefixRecords = await prisma[model].findMany({ where: prefixWhere, take: 400 });
+    if (prefixRecords.length) return rankTerminology(prefixRecords, query, fields, limit);
+    return terminologySearch(model, containsWhere, query, fields, limit);
+  };
+  const medicationItems = (records) => records.map((item) => ({ id: item.id, enteredName: item.brand, normalizedName: item.normalizedBrand, brand: item.brand, genericName: item.generic, mappingSource: item.source, mappingVersion: item.version }));
+  // Dataset terminology contains no patient data. Keeping these read-only lookups
+  // public lets the clinical form recover even if an older browser session expires.
+  app.get("/api/v1/terminology/medications", asyncRoute(async (req, res) => { const q = terminologyQuery(req.query.q); const limit = terminologyLimit(req.query.limit); const records = q ? await prefixFirstSearch("medicationTerminology", { OR: [{ normalizedBrand: { startsWith: q } }, { normalizedGeneric: { startsWith: q } }] }, { OR: [{ normalizedBrand: { contains: q } }, { normalizedGeneric: { contains: q } }] }, q, ["normalizedBrand", "normalizedGeneric"], limit) : await terminologySearch("medicationTerminology", {}, q, ["normalizedBrand", "normalizedGeneric"], limit); send(res, 200, { items: medicationItems(records) }, req.requestId); }));
+  app.get("/api/v1/terminology/brands", asyncRoute(async (req, res) => { const q = terminologyQuery(req.query.q); const limit = terminologyLimit(req.query.limit); const records = await terminologySearch("medicationTerminology", q ? { normalizedBrand: { contains: q } } : {}, q, ["normalizedBrand"], limit); send(res, 200, { items: medicationItems(records) }, req.requestId); }));
+  app.get("/api/v1/terminology/generics", asyncRoute(async (req, res) => { const q = terminologyQuery(req.query.q); const limit = terminologyLimit(req.query.limit); const records = await terminologySearch("medicationTerminology", q ? { normalizedGeneric: { contains: q } } : {}, q, ["normalizedGeneric"], limit); const unique = records.filter((item, index, list) => list.findIndex((candidate) => candidate.normalizedGeneric === item.normalizedGeneric) === index); send(res, 200, { items: medicationItems(unique) }, req.requestId); }));
+  app.get("/api/v1/terminology/indications", asyncRoute(async (req, res) => { const q = terminologyQuery(req.query.q); const limit = terminologyLimit(req.query.limit); const records = q ? await prefixFirstSearch("drugIndicationKnowledge", { normalizedIndication: { startsWith: q } }, { normalizedIndication: { contains: q } }, q, ["normalizedIndication"], 400) : await terminologySearch("drugIndicationKnowledge", {}, q, ["normalizedIndication"], 400); const unique = records.filter((item, index, list) => list.findIndex((candidate) => candidate.normalizedIndication === item.normalizedIndication) === index).slice(0, limit); send(res, 200, { items: unique.map((item) => ({ display: item.indication, normalizedName: item.normalizedIndication, source: item.source, datasetVersion: item.datasetVersion })) }, req.requestId); }));
+  app.get("/api/v1/terminology/conditions", asyncRoute(async (req, res) => { const q = terminologyQuery(req.query.q); const limit = terminologyLimit(req.query.limit); const fields = ["normalizedDisease", "normalizedConceptName", "normalizedSnomedName"]; const prefixWhere = { OR: fields.map((field) => ({ [field]: { startsWith: q } })) }; const containsWhere = { OR: fields.map((field) => ({ [field]: { contains: q } })) }; const records = q ? await prefixFirstSearch("drugDiseaseKnowledge", prefixWhere, containsWhere, q, fields, 400) : await terminologySearch("drugDiseaseKnowledge", {}, q, fields, 400); const unique = records.filter((item, index, list) => list.findIndex((candidate) => (candidate.diseaseIdentity || candidate.normalizedDisease) === (item.diseaseIdentity || item.normalizedDisease)) === index).slice(0, limit); send(res, 200, { items: unique.map((item) => ({ display: item.existingDisease, normalizedName: item.normalizedDisease, code: item.umlsCui ? `UMLS:${item.umlsCui}` : null, diseaseIdentity: item.diseaseIdentity, conceptName: item.conceptName || null, snomedName: item.snomedName || null, source: item.source, datasetVersion: item.datasetVersion })) }, req.requestId); }));
   app.get("/api/v1/terminology/adverse-events", authenticate, (req, res) => send(res, 200, { version: "2026.08", items: ["Nausea", "Rash", "Dizziness", "Headache", "Diarrhea", "Fatigue"] }, req.requestId));
 
   app.get("/api/v1/patient-intake-drafts/:scope", authenticate, asyncRoute(async (req, res) => { const draft = await prisma.intakeDraft.findUnique({ where: { clinicianId_scope: { clinicianId: req.auth.clinicianId, scope: req.params.scope } } }); if (!draft) throw Object.assign(new Error("Draft not found."), { status: 404, code: "DRAFT_NOT_FOUND" }); send(res, 200, draft, req.requestId); }));

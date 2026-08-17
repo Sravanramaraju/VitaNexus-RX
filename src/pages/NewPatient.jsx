@@ -10,10 +10,10 @@ import {
   COMMON_DISEASES,
   EXTENDED_ALLERGIES,
   EXTENDED_DISEASES,
-  TREATMENT_INDICATIONS,
 } from "../data/clinicalOptions";
 import { getDrugSelectionReasons } from "../lib/explainability";
-import { searchBrand, searchCondition } from "../lib/otcMapping";
+import { resolveDrugInput, searchCondition } from "../lib/otcMapping";
+import { useTerminologySearch } from "../hooks/useTerminologySearch";
 import {
   clearPatientIntakeDraft,
   getPatientIntakeDraft,
@@ -31,16 +31,14 @@ const allergyAlertClass = {
   Severe: "border-danger bg-danger/15 text-danger",
 };
 
-function IndicationAutocomplete({ value, options, onChange }) {
+function IndicationAutocomplete({ value, onChange }) {
   const [query, setQuery] = useState(value || "");
   const [open, setOpen] = useState(false);
-  const matches = options.filter((option) =>
-    option.toLowerCase().includes(query.trim().toLowerCase()),
-  );
+  const { items: matches, error } = useTerminologySearch("indications", query);
 
   useEffect(() => setQuery(value || ""), [value]);
 
-  return <div className="relative"><label className="block text-sm font-semibold">Diagnosis / Treatment Indication <span className="text-danger">*</span></label><input className="input mt-1" value={query} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => { setOpen(false); if (!value) setQuery(""); }, 150)} onChange={(event) => { setQuery(event.target.value); setOpen(true); onChange(""); }} placeholder="Search an indication" aria-autocomplete="list" aria-required="true" />{open && <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-lg border border-border bg-card shadow-md dark:border-slate-600 dark:bg-slate-800">{matches.length ? matches.map((option) => <button type="button" key={option} className="block w-full px-3 py-2 text-left text-sm hover:bg-primary/10" onMouseDown={(event) => event.preventDefault()} onClick={() => { onChange(option); setQuery(option); setOpen(false) }}>{option}</button>) : <p className="px-3 py-2 text-xs text-slate-500">No matching indication</p>}</div>}<p className="mt-1 text-xs text-slate-500">Choose from the standardized list. Options can later be loaded from a backend dataset.</p></div>
+  return <div className="relative"><label className="block text-sm font-semibold">Diagnosis / Treatment Indication <span className="text-danger">*</span></label><input className="input mt-1" value={query} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => { setOpen(false); if (!value) setQuery(""); }, 150)} onChange={(event) => { setQuery(event.target.value); setOpen(true); onChange(""); }} placeholder="Type one or more letters, e.g. D or De" aria-autocomplete="list" aria-required="true" />{open && query && <div className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-lg border border-border bg-card shadow-md dark:border-slate-600 dark:bg-slate-800">{error ? <p className="px-3 py-2 text-xs text-danger">Lookup unavailable: {error}</p> : matches.length ? matches.map((option) => <button type="button" key={option.normalizedName} className="block w-full px-3 py-2 text-left text-sm hover:bg-primary/10" onMouseDown={(event) => event.preventDefault()} onClick={() => { onChange(option.display); setQuery(option.display); setOpen(false) }}>{option.display}<span className="block text-xs text-slate-500">{option.source}</span></button>) : <p className="px-3 py-2 text-xs text-slate-500">No matching dataset indication</p>}</div>}<p className="mt-1 text-xs text-slate-500">Type a prefix to narrow real DrugCentral indications; up to 30 choices are shown.</p></div>
 }
 
 function CurrentMedicationList({ items = [], onChange }) {
@@ -50,17 +48,18 @@ function CurrentMedicationList({ items = [], onChange }) {
   const [frequency, setFrequency] = useState("");
   const [warning, setWarning] = useState("");
   const [editingIndex, setEditingIndex] = useState(null);
-  const matches = searchBrand(query);
+  const { items: matches, error } = useTerminologySearch("medications", query);
   const add = () => {
-    const drugName = selected?.generic || selected?.brand || query.trim();
+    const drugName = selected?.genericName || selected?.brand || query.trim();
     if (!drugName) return setWarning("Enter or select a medicine before adding it.");
     if (items.some((item) => (item.drugName || item.generic || item.brand).toLowerCase() === drugName.toLowerCase())) return setWarning(`${drugName} is already in the current medication list.`);
-    onChange([...items, { drugName, brand: selected?.brand || drugName, generic: selected?.generic || drugName, dosage: dosage.trim(), frequency: frequency.trim(), activeStatus: "active" }]);
+    const resolved = resolveDrugInput(selected ? { ...selected, generic: selected.genericName } : { brand: query.trim(), generic: drugName });
+    onChange([...items, { drugName, enteredName: resolved.enteredName, normalizedName: resolved.normalizedName, brand: resolved.brand || drugName, generic: resolved.generic || drugName, mappingSource: resolved.mappingSource, mappingVersion: resolved.mappingVersion, dosage: dosage.trim(), frequency: frequency.trim(), activeStatus: "active" }]);
     setQuery(""); setSelected(null); setDosage(""); setFrequency(""); setWarning("");
   };
   const editing = editingIndex === null ? null : items[editingIndex];
   const updateMedication = (changes) => onChange(items.map((item, index) => index === editingIndex ? { ...item, ...changes } : item));
-  return <div className="space-y-3"><div className="relative"><input className="input" value={selected ? `${selected.brand} (${selected.generic})` : query} onChange={(event) => { setSelected(null); setQuery(event.target.value); setWarning(""); }} placeholder="Search medicine brand or generic name" />{query && !selected && <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-lg border border-border bg-card shadow-md dark:border-slate-600 dark:bg-slate-800">{matches.length ? matches.map((item) => <button type="button" key={item.brand} onClick={() => { setSelected(item); setQuery(""); setWarning(""); }} className="block w-full px-3 py-2 text-left text-sm hover:bg-primary/10"><strong>{item.brand}</strong><span className="block text-xs text-slate-500">{item.generic}</span></button>) : <p className="px-3 py-2 text-xs text-slate-500">No matching medicines</p>}</div>}</div><div className="grid gap-2 sm:grid-cols-3"><input className="input" value={dosage} onChange={(event) => setDosage(event.target.value)} placeholder="Dosage (optional)" /><input className="input" value={frequency} onChange={(event) => setFrequency(event.target.value)} placeholder="Frequency (optional)" /><button type="button" className="btn-secondary" onClick={add}>Add medication</button></div>{warning && <p role="alert" className="text-xs font-medium text-warning">{warning}</p>}<p className="text-xs text-slate-500">Active status is recorded for future active, completed, and discontinued medication management.</p>{items.length > 0 && <div className="space-y-2">{items.map((item, index) => <div key={`${item.drugName || item.brand}-${index}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-700/50"><span><strong>{item.drugName || item.generic || item.brand}</strong> · {item.dosage || "Dosage not recorded"} · {item.frequency || "Frequency not recorded"}</span><div className="flex items-center gap-2"><select className="input py-1 text-xs" value={item.activeStatus || "active"} onChange={(event) => onChange(items.map((entry, entryIndex) => entryIndex === index ? { ...entry, activeStatus: event.target.value } : entry))}><option value="active">Active</option><option value="completed">Completed</option><option value="discontinued">Discontinued</option></select><button type="button" className="rounded p-1 text-primary hover:bg-primary/10" onClick={() => setEditingIndex(index)} aria-label={`Edit ${item.drugName || item.brand}`}><Pencil size={15} /></button><button type="button" className="text-xs font-semibold text-danger" onClick={() => onChange(items.filter((_, entryIndex) => entryIndex !== index))}>Remove</button></div></div>)}</div>}{editing && <div className="rounded-lg border border-primary/30 p-3"><p className="text-sm font-semibold">Edit {editing.drugName || editing.brand}</p><div className="mt-2 grid gap-2 sm:grid-cols-2"><label className="text-xs font-semibold">Dosage<input className="input mt-1" value={editing.dosage || ""} onChange={(event) => updateMedication({ dosage: event.target.value })} /></label><label className="text-xs font-semibold">Frequency<input className="input mt-1" value={editing.frequency || ""} onChange={(event) => updateMedication({ frequency: event.target.value })} /></label></div><button type="button" className="btn-secondary mt-3" onClick={() => setEditingIndex(null)}>Done</button></div>}</div>
+  return <div className="space-y-3"><div className="relative"><input className="input" value={selected ? `${selected.brand} (${selected.genericName})` : query} onChange={(event) => { setSelected(null); setQuery(event.target.value); setWarning(""); }} placeholder="Type a brand or generic name" />{query && !selected && <div className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-lg border border-border bg-card shadow-md dark:border-slate-600 dark:bg-slate-800">{error ? <p className="px-3 py-2 text-xs text-danger">Lookup unavailable: {error}</p> : matches.length ? matches.map((item) => <button type="button" key={item.id} onClick={() => { setSelected(item); setQuery(""); setWarning(""); }} className="block w-full px-3 py-2 text-left text-sm hover:bg-primary/10"><strong>{item.brand}</strong><span className="block text-xs text-slate-500">Generic: {item.genericName} · {item.mappingSource}</span></button>) : <p className="px-3 py-2 text-xs text-slate-500">No matching Indian brand or generic medicine</p>}</div>}</div><div className="grid gap-2 sm:grid-cols-3"><input className="input" value={dosage} onChange={(event) => setDosage(event.target.value)} placeholder="Dosage (optional)" /><input className="input" value={frequency} onChange={(event) => setFrequency(event.target.value)} placeholder="Frequency (optional)" /><button type="button" className="btn-secondary" onClick={add}>Add medication</button></div>{warning && <p role="alert" className="text-xs font-medium text-warning">{warning}</p>}<p className="text-xs text-slate-500">Start with one letter; both Indian brand and generic-name matches are shown.</p>{items.length > 0 && <div className="space-y-2">{items.map((item, index) => <div key={`${item.drugName || item.brand}-${index}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-700/50"><span><strong>Entered name: {item.enteredName || item.brand}</strong> · Generic name: {item.generic || item.drugName}<small className="block text-xs text-slate-500">Mapping source: {item.mappingSource || "Indian Medicine Dataset"}</small></span><div className="flex items-center gap-2"><select className="input py-1 text-xs" value={item.activeStatus || "active"} onChange={(event) => onChange(items.map((entry, entryIndex) => entryIndex === index ? { ...entry, activeStatus: event.target.value } : entry))}><option value="active">Active</option><option value="completed">Completed</option><option value="discontinued">Discontinued</option></select><button type="button" className="rounded p-1 text-primary hover:bg-primary/10" onClick={() => setEditingIndex(index)} aria-label={`Edit ${item.drugName || item.brand}`}><Pencil size={15} /></button><button type="button" className="text-xs font-semibold text-danger" onClick={() => onChange(items.filter((_, entryIndex) => entryIndex !== index))}>Remove</button></div></div>)}</div>}{editing && <div className="rounded-lg border border-primary/30 p-3"><p className="text-sm font-semibold">Edit {editing.drugName || editing.brand}</p><div className="mt-2 grid gap-2 sm:grid-cols-2"><label className="text-xs font-semibold">Dosage<input className="input mt-1" value={editing.dosage || ""} onChange={(event) => updateMedication({ dosage: event.target.value })} /></label><label className="text-xs font-semibold">Frequency<input className="input mt-1" value={editing.frequency || ""} onChange={(event) => updateMedication({ frequency: event.target.value })} /></label></div><button type="button" className="btn-secondary mt-3" onClick={() => setEditingIndex(null)}>Done</button></div>}</div>
 }
 
 const prescriptionToMedication = (visit) => {
@@ -97,8 +96,10 @@ function ConditionPanel({ title, common, extended, kind, entries, onChange }) {
   const [name, setName] = useState("");
   const [detail, setDetail] = useState(kind === "allergy" ? "Mild" : "");
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [selectedDatasetCondition, setSelectedDatasetCondition] = useState(null);
   const detailRef = useRef(null);
-  const results = searchCondition(name, extended);
+  const { items: datasetResults, error } = useTerminologySearch("conditions", kind === "disease" ? name : "");
+  const results = kind === "disease" ? datasetResults : searchCondition(name, extended);
   const has = (condition) =>
     entries.some(
       (entry) => entry.name.toLowerCase() === condition.toLowerCase(),
@@ -125,17 +126,20 @@ function ConditionPanel({ title, common, extended, kind, entries, onChange }) {
       (item) => item.toLowerCase() === finalName.toLowerCase(),
     );
     const recognized = commonName || extendedName;
+    const selectedCondition = kind === "disease" && selectedDatasetCondition?.display === finalName ? selectedDatasetCondition : null;
+    const diseaseEntry = (display) => ({ name: display, duration: detail, isCustom: !selectedCondition, code: selectedCondition?.code || null, source: selectedCondition?.source || "clinician-entered" });
     if (commonName && !has(commonName))
       onChange([...entries, kind === "allergy" ? { name: commonName, severity: detail, isCustom: false } : { name: commonName, duration: detail, isCustom: false }]);
     else if (!has(recognized || finalName))
       onChange([
         ...entries,
-        kind === "allergy" ? { name: recognized || finalName, severity: detail, isCustom: !recognized } : { name: recognized || finalName, duration: detail, isCustom: !recognized },
+        kind === "allergy" ? { name: recognized || finalName, severity: detail, isCustom: !recognized } : diseaseEntry(recognized || finalName),
       ]);
     else if (has(recognized || finalName))
       updateDetail(recognized || finalName, detail);
     setName("");
     setDetail(kind === "allergy" ? "Mild" : "");
+    setSelectedDatasetCondition(null);
     setShowSuggestions(false);
   };
   return (
@@ -197,25 +201,28 @@ function ConditionPanel({ title, common, extended, kind, entries, onChange }) {
               value={name}
               onChange={(e) => {
                 setName(e.target.value);
+                setSelectedDatasetCondition(null);
                 setShowSuggestions(true);
               }}
             />
-            {showSuggestions && name && results.length > 0 && (
-              <div className="absolute z-20 mt-1 w-full rounded-lg border border-border bg-card shadow-md dark:border-slate-600 dark:bg-slate-800">
-                {results.map((result) => (
+            {showSuggestions && name && (
+              <div className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-lg border border-border bg-card shadow-md dark:border-slate-600 dark:bg-slate-800">
+                {results.length ? results.map((result) => (
                   <button
                     type="button"
                     className="block w-full px-3 py-2 text-left text-sm hover:bg-primary/10"
                     onClick={() => {
-                      setName(result);
+                      const display = kind === "disease" ? result.display : result;
+                      setName(display);
+                      setSelectedDatasetCondition(kind === "disease" ? result : null);
                       setShowSuggestions(false);
                       requestAnimationFrame(() => detailRef.current?.focus());
                     }}
-                    key={result}
+                    key={kind === "disease" ? result.diseaseIdentity || result.normalizedName : result}
                   >
-                    {result}
+                    {kind === "disease" ? <><strong>{result.display}</strong><span className="block text-xs text-slate-500">{result.source}{result.code ? ` · ${result.code}` : ""}</span></> : result}
                   </button>
-                ))}
+                )) : <p className={`px-3 py-2 text-xs ${error ? "text-danger" : "text-slate-500"}`}>{error ? `Lookup unavailable: ${error}` : "No matching dataset disease"}</p>}
               </div>
             )}
           </div>
@@ -284,7 +291,7 @@ function ConditionPanel({ title, common, extended, kind, entries, onChange }) {
 
 function PrescribedDrug({ value, onChange }) {
   const [query, setQuery] = useState("");
-  const matches = searchBrand(query);
+  const { items: matches, error } = useTerminologySearch("medications", query);
   return (
     <div>
       <label className="text-sm font-semibold">Prescribed drug</label>
@@ -293,24 +300,24 @@ function PrescribedDrug({ value, onChange }) {
           className="input"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search a brand"
+          placeholder="Type a brand or generic name"
         />
         {query && (
-          <div className="absolute z-20 mt-1 w-full rounded-lg border border-border bg-card shadow-md dark:border-slate-600 dark:bg-slate-800">
-            {matches.length ? (
+          <div className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-lg border border-border bg-card shadow-md dark:border-slate-600 dark:bg-slate-800">
+            {error ? <p className="px-3 py-2 text-xs text-danger">Lookup unavailable: {error}</p> : matches.length ? (
               matches.map((item) => (
                 <button
                   type="button"
                   key={item.brand}
                   onClick={() => {
-                    onChange(item);
+                    onChange(resolveDrugInput({ ...item, generic: item.genericName }));
                     setQuery("");
                   }}
                   className="block w-full px-3 py-2 text-left text-sm hover:bg-primary/10"
                 >
                   <strong>{item.brand}</strong>
                   <span className="block text-xs text-slate-500">
-                    {item.generic}
+                    Generic: {item.genericName}
                   </span>
                 </button>
               ))
@@ -325,7 +332,7 @@ function PrescribedDrug({ value, onChange }) {
       {value && (
         <div className="mt-3 rounded-lg bg-primary/10 p-3 text-sm text-primary">
           <span className="font-semibold">
-            Brand: {value.brand} / Generic: {value.generic}
+            Entered drug name: {value.enteredName || value.brand} / Generic name: {value.generic} / Mapping source: {value.mappingSource || "Indian Medicine Dataset"}
           </span>
           <ExplainToggle reasons={getDrugSelectionReasons()} />
         </div>
@@ -387,23 +394,23 @@ export default function NewPatient() {
       ),
     [clinical],
   );
-  const analyze = () => {
+  const analyze = async () => {
     if (isPatientEdit) {
-      editPatient(existing.id, { ...basic, age: Number(basic.age) }, clinical);
+      await editPatient(existing.id, { ...basic, age: Number(basic.age) }, clinical);
       clearPatientIntakeDraft(existingPatientId);
       navigate("/dashboard");
       return;
     }
     if (!consultation.prescription?.medicine || !consultation.indication || !consultation.prescription.dosage.trim() || !isValidFrequency(consultation.prescription.frequency)) return;
     const result = existing
-      ? addVisitToPatient(existing.id, consultation)
-      : createPatient(
+      ? await addVisitToPatient(existing.id, consultation)
+      : await createPatient(
           { ...basic, age: Number(basic.age) },
           clinical,
           consultation,
         );
-    const id = existing ? existing.id : result.id;
-    const visitId = existing ? result.visit.id : result.visits[0].id;
+    const id = existing ? existing.id : result.patient.id;
+    const visitId = result.visit.id;
     clearPatientIntakeDraft(existingPatientId);
     navigate(`/patients/${id}`, { state: { entry: "results", visitId } });
   };
@@ -515,7 +522,7 @@ export default function NewPatient() {
             onChange={(medicine) => setConsultation({ ...consultation, prescription: { ...consultation.prescription, medicine } })}
           />
           <div className="grid gap-4 md:grid-cols-2"><label className="block text-sm font-semibold">Dosage <span className="text-danger">*</span><input className="input mt-1" placeholder="e.g. 500 mg, 5 mL, 1 Tablet, 2 Capsules" value={consultation.prescription?.dosage || ""} onChange={(event) => setConsultation({ ...consultation, prescription: { ...consultation.prescription, dosage: event.target.value } })} /></label><label className="block text-sm font-semibold">Frequency <span className="text-danger">*</span><input className={`input mt-1 ${(consultation.prescription?.frequency) && !isValidFrequency(consultation.prescription.frequency) ? "border-danger" : ""}`} placeholder="e.g. 1d" value={consultation.prescription?.frequency || ""} onChange={(event) => setConsultation({ ...consultation, prescription: { ...consultation.prescription, frequency: event.target.value } })} /><span className="mt-1 block text-xs font-normal text-slate-500">{frequencyHelp.map(([code, label]) => `${code} = ${label}`).join(" · ")}</span></label></div>
-          <IndicationAutocomplete value={consultation.indication} options={TREATMENT_INDICATIONS} onChange={(indication) => setConsultation({ ...consultation, indication })} />
+          <IndicationAutocomplete value={consultation.indication} onChange={(indication) => setConsultation({ ...consultation, indication })} />
           <label className="block text-sm font-semibold">
             Doctor Notes{" "}
             <span className="font-normal text-slate-500">(optional)</span>

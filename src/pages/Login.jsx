@@ -7,7 +7,7 @@ import { useAuth } from '../context/AuthContext'
 export default function Login() {
   const { doctor, login } = useAuth(); const navigate = useNavigate(); const [form, setForm] = useState({ email: '', password: '' }); const [error, setError] = useState('')
   if (doctor) return <Navigate to="/dashboard" replace />
-  const submit = (event) => { event.preventDefault(); setError(''); try { login(form.email, form.password); navigate('/dashboard') } catch (err) { setError(err.message) } }
+  const submit = async (event) => { event.preventDefault(); setError(''); try { await login(form.email, form.password); navigate('/dashboard') } catch (err) { setError(err.message) } }
   return <main className="login-page"><div className="login-page__shell">
     <header className="login-page__header"><div className="login-page__brand"><span><Stethoscope size={17} /></span>VitaNexus-RX</div><p>Clinical decision support</p></header>
     <section className="login-page__content"><div className="login-page__intro"><span className="login-page__intro-icon"><FlaskConical size={23} /></span><p>Connected clinical intelligence</p><h1>Bring every patient interaction into focus.</h1><span>Continue to your workspace for structured medication review and informed follow-up.</span></div>

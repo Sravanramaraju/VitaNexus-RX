@@ -6,19 +6,17 @@ import {
   ClipboardPlus,
   UserPlus,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import ExplainToggle from "../components/shared/ExplainToggle";
 import { usePatient } from "../context/PatientContext";
 import { SIDE_EFFECT_TERMS } from "../data/sideEffects";
-import { requestAdrPrediction } from "../services/adrPredictionService";
 import {
   getDrugDiseaseReasons,
   getDDIPredictionReasons,
   getFeedbackUsageReasons,
   getOverallClinicalRiskReasons,
   getRankingReasons,
-  getReliabilityReasons,
 } from "../lib/explainability";
 
 export function resolveEntryStep(visit, navigationState) {
@@ -27,21 +25,6 @@ export function resolveEntryStep(visit, navigationState) {
     return "followup";
   if (visit?.status === "completed") return "results";
   return "followup";
-}
-
-function RangeBar({ low = 0, high = 0 }) {
-  const width = Math.max(2, high - low);
-  return (
-    <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
-      <motion.div
-        initial={{ width: 0 }}
-        animate={{ width: `${width}%` }}
-        transition={{ duration: 0.45, ease: "easeInOut" }}
-        className="h-full rounded-full bg-primary"
-        style={{ marginLeft: `${low}%` }}
-      />
-    </div>
-  );
 }
 
 function ResultCard({ title, children }) {
@@ -58,27 +41,27 @@ function ResultCard({ title, children }) {
   );
 }
 
-const severityFromRisk = (risk) =>
-  risk > 60 ? "High" : risk > 30 ? "Moderate" : "Low";
-const normalizeSeverity = (severity, risk) => {
-  if (severity === "Contraindicated") return "Contraindicated";
-  if (severity === "Severe") return "High";
-  if (severity === "Mild") return "Low";
-  return severity || severityFromRisk(risk || 0);
-};
-const reliabilityFromConfidence = (label, pct) => {
-  if (label === "Very High" || label === "High" || pct > 65) return "High";
-  if (label === "Moderate" || pct > 45) return "Medium";
-  return "Low";
-};
+const normalizeSeverity = (severity) => severity || "NOT_EVALUATED";
 const formatDuration = (duration) =>
   /^\d+$/.test(String(duration)) ? `${duration} days` : duration;
+const datasetResultLabel = (value, dataStatus) =>
+  dataStatus === "NO_DATASET_MATCH" || value === "NOT_EVALUATED"
+    ? "NO INTERACTION DETECTED"
+    : value;
 
-function InteractionSeverityBadge({ severity }) {
+function AssessmentBadge({ severity }) {
+  if (severity === "NO INTERACTION DETECTED") {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-800 bg-emerald-900 px-2.5 py-1 text-xs font-bold tracking-wide text-emerald-50 dark:border-emerald-400 dark:bg-emerald-950 dark:text-emerald-100">
+        <CheckCircle2 size={13} aria-hidden="true" />
+        {severity}
+      </span>
+    );
+  }
   const tone =
-    severity === "Contraindicated" || severity === "High"
+    severity === "Contraindicated" || severity === "High" || severity === "HIGH" || severity === "MAJOR"
       ? "bg-danger"
-      : severity === "Moderate"
+      : severity === "Moderate" || severity === "MODERATE"
         ? "bg-warning text-slate-900"
         : "bg-success";
   return (
@@ -101,145 +84,6 @@ function Metric({ label, children, className = "" }) {
   );
 }
 
-function AdrRiskAssessment({ patient, visit, onBack, onNext, onSave }) {
-  const [prediction, setPrediction] = useState(visit.adrPrediction || null);
-  const [status, setStatus] = useState(
-    visit.adrPrediction?.predictionStatus || "loading",
-  );
-  const [error, setError] = useState("");
-  const candidateDrug =
-    visit.prescription?.medicine || visit.prescribedDrug || null;
-
-  const loadPrediction = useCallback(async () => {
-    setStatus("loading");
-    setError("");
-    try {
-      const candidateName = (
-        candidateDrug?.generic ||
-        candidateDrug?.drugName ||
-        candidateDrug?.brand ||
-        ""
-      ).toLowerCase();
-      const response = await requestAdrPrediction({
-        patientId: patient.id,
-        age: patient.age,
-        gender: patient.gender,
-        currentMedications: (patient.currentMedications || []).filter(
-          (medication) =>
-            medication.activeStatus === "active" &&
-            (medication.drugName || medication.generic || medication.brand || "").toLowerCase() !==
-              candidateName,
-        ),
-        candidateDrug,
-      });
-      if (!response) {
-        setPrediction(null);
-        setStatus("unavailable");
-        return;
-      }
-      setPrediction(response);
-      setStatus(response.predictionStatus || "success");
-      onSave(response);
-    } catch {
-      setStatus("failed");
-      setError("The ADR prediction could not be loaded.");
-    }
-  }, [candidateDrug, onSave, patient]);
-
-  useEffect(() => {
-    if (visit.adrPrediction?.predictionStatus === "success") {
-      setPrediction(visit.adrPrediction);
-      setStatus("success");
-      return;
-    }
-    loadPrediction();
-  }, [loadPrediction, visit.adrPrediction, visit.id]);
-
-  const riskCategory = prediction?.riskCategory || "Low";
-  return (
-    <div className="space-y-5">
-      <div>
-        <p className="eyebrow">Clinical safety analysis</p>
-        <h2 className="mt-1 text-xl font-bold">
-          Adverse Drug Reaction Risk Assessment
-        </h2>
-        <p className="mt-2 max-w-3xl text-sm text-slate-600 dark:text-slate-300">
-          Evaluate the predicted probability of an adverse drug reaction based
-          on patient demographics, current medications and the newly prescribed
-          medicine.
-        </p>
-      </div>
-
-      {status === "loading" && (
-        <ResultCard title="ADR Prediction">
-          <p className="mt-4 text-sm text-slate-600 dark:text-slate-300">
-            Loading prediction...
-          </p>
-        </ResultCard>
-      )}
-
-      {status === "failed" && (
-        <ResultCard title="ADR Prediction">
-          <p className="mt-4 text-sm text-danger">{error}</p>
-          <button className="btn-secondary mt-4" onClick={loadPrediction}>
-            Retry
-          </button>
-        </ResultCard>
-      )}
-
-      {status === "unavailable" && (
-        <ResultCard title="ADR Prediction">
-          <p className="mt-4 text-sm text-slate-600 dark:text-slate-300">
-            No prediction available.
-          </p>
-          <button className="btn-secondary mt-4" onClick={loadPrediction}>
-            Retry
-          </button>
-        </ResultCard>
-      )}
-
-      {status === "success" && prediction && (
-        <ResultCard title="ADR Prediction">
-          <div className="mt-4 grid gap-5 sm:grid-cols-2">
-            <Metric label="Predicted ADR Risk (%)">
-              <span className="text-4xl font-bold text-primary">
-                {prediction.predictedAdrRisk}%
-              </span>
-            </Metric>
-            <Metric label="Risk Category">
-              <InteractionSeverityBadge severity={riskCategory} />
-            </Metric>
-            <Metric label="Prediction Confidence">
-              {prediction.confidence}%
-            </Metric>
-            <Metric label="Confidence Interval">
-              {prediction.confidenceInterval?.lower}% -{" "}
-              {prediction.confidenceInterval?.upper}%
-            </Metric>
-          </div>
-          <ExplainToggle reasons={prediction.explanations || []} />
-          {/* Reserved for future ML metadata and feature-importance outputs. */}
-        </ResultCard>
-      )}
-
-      <div className="flex flex-wrap justify-between gap-3">
-        <button className="btn-secondary" onClick={onBack}>
-          <ChevronLeft size={16} />
-          Clinical Safety Analysis
-        </button>
-        <button
-          className="btn-primary"
-          onClick={onNext}
-          disabled={status !== "success"}
-        >
-          Recommended Safer Alternatives
-          <ChevronRight size={16} />
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function SideEffectField({ value, onChange }) {
   return (
     <>
@@ -257,30 +101,24 @@ function SideEffectField({ value, onChange }) {
         ))}
       </datalist>
       <p className="mt-1 text-xs text-slate-500">
-        Select the standardized term used for DrugBank/FAERS matching.
+        Record a standardized term for clinician follow-up. This workflow does not query FAERS.
       </p>
     </>
   );
 }
 
 function Results({
-  patient,
   visit,
   historical,
   stage,
   onStageChange,
-  onSaveAdr,
   onSaveNotes,
   onAddPatient,
 }) {
   const [notes, setNotes] = useState(visit.doctorNotes || "");
-  const risk = visit.riskResult;
-  const confidence = visit.confidence;
-  const severity = normalizeSeverity(risk?.severity, risk?.score);
-  const reliability = reliabilityFromConfidence(
-    confidence?.reliabilityLabel,
-    confidence?.pct,
-  );
+  const safety = visit.safetyResult;
+  const risk = safety?.drugDrug || visit.riskResult;
+  const severity = normalizeSeverity(risk?.severity);
 
   useEffect(
     () => setNotes(visit.doctorNotes || ""),
@@ -288,18 +126,8 @@ function Results({
   );
 
   const insights = [
-    ["Prediction", getDDIPredictionReasons(severity)],
-    [
-      "Confidence",
-      [
-        `Prediction confidence is ${confidence?.pct ?? 0}%.`,
-        "The interval visualizes the uncertainty range.",
-      ],
-    ],
-    [
-      "Reliability",
-      getReliabilityReasons(confidence?.reliabilityLabel || "Moderate"),
-    ],
+    ["Dataset result", risk?.explanations || getDDIPredictionReasons(severity)],
+    ["Evidence", ["DDI severity is a DDInter 2.0 classification, not a probability.", "Drug-disease assessment is derived from DrugCentral relationships when available."]],
     ["Alternative Ranking", getRankingReasons()],
     [
       "Feedback Learning",
@@ -308,18 +136,6 @@ function Results({
         : ["Feedback learning becomes available after follow-up is submitted."],
     ],
   ];
-
-  if (stage === "adr") {
-    return (
-      <AdrRiskAssessment
-        patient={patient}
-        visit={visit}
-        onBack={() => onStageChange("results")}
-        onNext={() => onStageChange("recommendations")}
-        onSave={onSaveAdr}
-      />
-    );
-  }
 
   return (
     <div className="space-y-5">
@@ -331,69 +147,50 @@ function Results({
             <section>
               <h3 className="text-sm font-bold">Drug–Drug Analysis</h3>
               <div className="mt-3 grid grid-cols-2 gap-x-5 gap-y-4">
-                <Metric label="Interaction Risk (%)">{risk?.score ?? 0}%</Metric>
-                <Metric label="Interaction Severity">
-                  <InteractionSeverityBadge severity={severity} />
+                <Metric label="Severity">
+                  <AssessmentBadge severity={datasetResultLabel(severity, risk?.dataStatus)} />
                 </Metric>
-                <Metric label="Confidence">{confidence?.pct ?? 0}%</Metric>
-                <Metric label="Reliability">{reliability}</Metric>
-                <Metric label="Confidence Interval" className="col-span-2">
-                  {confidence?.intervalLow ?? 0}% - {confidence?.intervalHigh ?? 0}%
-                </Metric>
+                <Metric label="Source">{risk?.source || "DDInter 2.0"}</Metric>
               </div>
-              <ExplainToggle reasons={getDDIPredictionReasons(severity)} />
+              <p className="mt-3 text-xs text-slate-500">{risk?.dataStatus === "NO_DATASET_MATCH" ? "Evaluation completed: no DDInter 2.0 record exists for the compared dataset terms shown under Why?." : "Evaluation completed with matching DDInter 2.0 source evidence."}</p>
+              <ExplainToggle reasons={risk?.explanations || getDDIPredictionReasons(severity)} />
             </section>
 
             <section className="border-t border-border pt-4 dark:border-slate-700">
               <h3 className="text-sm font-bold">Drug–Disease Analysis</h3>
               <div className="mt-3">
-                <Metric label="Interaction Risk (%)">42%</Metric>
+                <Metric label="Assessment"><AssessmentBadge severity={datasetResultLabel(safety?.drugDisease?.assessment, safety?.drugDisease?.dataStatus)} /></Metric>
+                <Metric label="Source">{safety?.drugDisease?.source || "DrugCentral"}</Metric>
+                {safety?.drugDisease?.findings?.map((finding, index) => <Metric key={`${finding.existingDisease}-${index}`} label={`${finding.existingDisease} / ${finding.proposedDrug}`} className="col-span-2">{finding.evidence || finding.relationship}</Metric>)}
               </div>
               <ExplainToggle reasons={getDrugDiseaseReasons()} />
             </section>
 
             <section className="rounded-lg border border-primary/20 bg-primary/5 p-4">
-              <h3 className="text-sm font-bold">Overall Clinical Risk</h3>
+              <h3 className="text-sm font-bold">Overall Clinical Assessment</h3>
               <div className="mt-3 grid grid-cols-2 gap-x-5 gap-y-4">
-                <Metric label="Overall Risk (%)">{risk?.score ?? 0}%</Metric>
-                <Metric label="Confidence">{confidence?.pct ?? 0}%</Metric>
+                <Metric label="Assessment"><AssessmentBadge severity={datasetResultLabel(safety?.overall?.assessment || (severity === "MAJOR" ? "HIGH" : severity === "MODERATE" ? "MODERATE" : severity === "MINOR" ? "LOW" : "NOT_EVALUATED"), safety?.overall?.dataStatus)} /></Metric>
+                <Metric label="Basis">DDInter 2.0 + DrugCentral</Metric>
               </div>
               <ExplainToggle reasons={getOverallClinicalRiskReasons()} />
             </section>
           </div>
         </ResultCard>
 
-        <ResultCard title="Conformal Reliability">
-          <div className="mt-4 flex items-center justify-between gap-4">
-            <span className="text-sm text-slate-600 dark:text-slate-300">
-              Confidence interval
-            </span>
-            <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-bold text-primary">
-              {confidence?.reliabilityLabel}
-            </span>
-          </div>
-          <RangeBar
-            low={confidence?.intervalLow}
-            high={confidence?.intervalHigh}
-          />
-          <p className="mt-2 text-xs text-slate-500">
-            {confidence?.intervalLow}% - {confidence?.intervalHigh}%
+        <ResultCard title="Dataset Evaluation Status">
+          <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">
+            DDInter 2.0 and DrugCentral checks are complete. “No match found” is a completed source check, not a missing dataset import.
           </p>
-          <ExplainToggle
-            reasons={getReliabilityReasons(
-              confidence?.reliabilityLabel || "Moderate",
-            )}
-          />
         </ResultCard>
       </div>
 
           <div className="flex flex-wrap justify-end gap-3">
             <button
               type="button"
-              onClick={() => onStageChange("adr")}
+              onClick={() => onStageChange("recommendations")}
               className="btn-primary"
             >
-              Continue to ADR Assessment
+              View Dataset-Evaluated Alternatives
               <ChevronRight size={16} />
             </button>
           </div>
@@ -402,16 +199,9 @@ function Results({
 
       {stage === "recommendations" && (
         <>
-      <ResultCard title="Recommended Safer Alternatives">
+        <ResultCard title="Recommended Safer Alternatives">
         <div className="mt-4 space-y-4">
-          {(visit.recommendations || []).map((recommendation, index) => {
-            const alternativeSeverity = severityFromRisk(
-              recommendation.riskPct,
-            );
-            const alternativeReliability = reliabilityFromConfidence(
-              null,
-              recommendation.confidencePct,
-            );
+          {(visit.recommendations || []).length ? (visit.recommendations || []).map((recommendation, index) => {
             return (
               <div
                 className="rounded-lg bg-slate-50 p-3 dark:bg-slate-700/50"
@@ -421,30 +211,15 @@ function Results({
                   {index + 1}. {recommendation.drug}
                 </strong>
                 <div className="mt-3 grid grid-cols-2 gap-x-5 gap-y-4">
-                  <Metric label="Interaction Severity">
-                    <InteractionSeverityBadge severity={alternativeSeverity} />
-                  </Metric>
-                  <Metric label="Predicted Interaction Risk">
-                    {recommendation.riskPct}%
-                  </Metric>
-                  <Metric label="Prediction Confidence">
-                    {recommendation.confidencePct}%
-                  </Metric>
-                  <Metric label="Reliability">{alternativeReliability}</Metric>
-                  <Metric label="Drug–Disease Risk">42%</Metric>
-                  <Metric label="Drug–Allergy Risk">18%</Metric>
-                  <Metric label="Confidence Interval" className="col-span-2">
-                    {recommendation.intervalLow}% -{" "}
-                    {recommendation.intervalHigh}%
-                  </Metric>
+                  <Metric label="Assessment"><AssessmentBadge severity={datasetResultLabel(recommendation.assessment, recommendation.dataStatus)} /></Metric>
+                  <Metric label="Source">{recommendation.source || "DrugCentral"}</Metric>
+                  <Metric label="Indication relationship" className="col-span-2">{recommendation.indicationRelationship || "Candidate lookup pending"}</Metric>
+                  <Metric label="DDInter check"><AssessmentBadge severity={datasetResultLabel(recommendation.drugDrug?.severity, recommendation.dataStatus)} /></Metric>
+                  <Metric label="DrugCentral condition check"><AssessmentBadge severity={datasetResultLabel(recommendation.drugDisease?.assessment, recommendation.dataStatus)} /></Metric>
                 </div>
-                <RangeBar
-                  low={recommendation.intervalLow}
-                  high={recommendation.intervalHigh}
-                />
               </div>
             );
-          })}
+          }) : <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-600 dark:bg-slate-700/50 dark:text-slate-200">Evaluation completed: DrugCentral has no indication candidate for this exact recorded indication. Choose a dataset indication from the lookup to obtain candidate results.</p>}
         </div>
         <ExplainToggle label="Why ranked?" reasons={getRankingReasons()} />
       </ResultCard>
@@ -750,11 +525,6 @@ function UpdatedRecommendations({ visit, historical, onBack }) {
         <div className="mt-4 space-y-4">
           {items.length ? (
             items.map((recommendation, index) => {
-              const severity = severityFromRisk(recommendation.riskPct);
-              const reliability = reliabilityFromConfidence(
-                null,
-                recommendation.confidencePct,
-              );
               return (
                 <div
                   className="rounded-lg bg-slate-50 p-3 dark:bg-slate-700/50"
@@ -764,27 +534,12 @@ function UpdatedRecommendations({ visit, historical, onBack }) {
                     {index + 1}. {recommendation.drug}
                   </strong>
                   <div className="mt-3 grid grid-cols-2 gap-x-5 gap-y-4">
-                    <Metric label="Interaction Severity">
-                      <InteractionSeverityBadge severity={severity} />
+                    <Metric label="Assessment">
+                      <AssessmentBadge severity={datasetResultLabel(recommendation.assessment, recommendation.dataStatus)} />
                     </Metric>
-                    <Metric label="Predicted Interaction Risk">
-                      {recommendation.riskPct}%
-                    </Metric>
-                    <Metric label="Prediction Confidence">
-                      {recommendation.confidencePct}%
-                    </Metric>
-                    <Metric label="Reliability">{reliability}</Metric>
-                    <Metric label="Drug–Disease Risk">42%</Metric>
-                    <Metric label="Drug–Allergy Risk">18%</Metric>
-                    <Metric label="Confidence Interval" className="col-span-2">
-                      {recommendation.intervalLow}% -{" "}
-                      {recommendation.intervalHigh}%
-                    </Metric>
+                    <Metric label="Source">{recommendation.source || "DrugCentral"}</Metric>
+                    <Metric label="Indication relationship" className="col-span-2">{recommendation.indicationRelationship || "Candidate lookup pending"}</Metric>
                   </div>
-                  <RangeBar
-                    low={recommendation.intervalLow}
-                    high={recommendation.intervalHigh}
-                  />
                 </div>
               );
             })
@@ -809,7 +564,6 @@ function UpdatedRecommendations({ visit, historical, onBack }) {
 function WizardSteps({ activeStep, visitedSteps, onStepChange }) {
   const steps = [
     ["results", "Clinical Safety"],
-    ["adr", "ADR Risk Assessment"],
     ["recommendations", "Recommendations"],
     ["followup", "Follow-up"],
     ["updated", "Follow-up Recommendation"],
@@ -852,7 +606,6 @@ export default function PatientRecord() {
     setActiveVisitId,
     submitFeedback,
     saveFollowUpDraft,
-    saveAdrPrediction,
     saveVisitNotes,
   } = usePatient();
   const patient = patients.find((item) => item.id === patientId);
@@ -874,7 +627,6 @@ export default function PatientRecord() {
   );
   const [visitedSteps, setVisitedSteps] = useState(() => ({
     results: true,
-    adr: activeVisit?.status === "completed",
     recommendations: activeVisit?.status === "completed",
     followup:
       activeVisit?.status === "completed" ||
@@ -902,7 +654,6 @@ export default function PatientRecord() {
       setStep(resolveEntryStep(activeVisit, stateForVisit));
       setVisitedSteps({
         results: true,
-        adr: activeVisit.status === "completed",
         recommendations: activeVisit.status === "completed",
         followup:
           activeVisit.status === "completed" ||
@@ -932,17 +683,13 @@ export default function PatientRecord() {
     setStep(target);
   };
   const body =
-    step === "results" || step === "adr" || step === "recommendations" ? (
+    step === "results" || step === "recommendations" ? (
       <Results
-        patient={patient}
         visit={activeVisit}
         historical={historical}
         stage={step}
         onStageChange={(target) =>
           target === "results" ? goToVisitedStep(target) : advanceToStep(target)
-        }
-        onSaveAdr={(adrPrediction) =>
-          saveAdrPrediction(patient.id, activeVisit.id, adrPrediction)
         }
         onSaveNotes={(notes) =>
           saveVisitNotes(patient.id, activeVisit.id, notes)

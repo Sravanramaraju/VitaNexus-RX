@@ -23,10 +23,10 @@ describe("patient allergy profile contract", () => {
   });
 
   it("omits legacy automated drug-allergy output without changing the stored snapshot", () => {
-    const legacy = { drugDrug: { riskPercentage: 12 }, drugAllergy: { riskPercentage: 90 }, overall: { riskPercentage: 90 } };
+    const legacy = { drugDrug: { severity: "MINOR" }, drugAllergy: { legacyOnly: true }, overall: { assessment: "LOW" } };
     const active = activeSafetyResult(legacy);
     expect(active).not.toHaveProperty("drugAllergy");
     expect(active.legacyFieldsOmitted).toEqual(["drugAllergy"]);
-    expect(legacy.drugAllergy.riskPercentage).toBe(90);
+    expect(legacy.drugAllergy.legacyOnly).toBe(true);
   });
 });

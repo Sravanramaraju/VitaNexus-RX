@@ -11,6 +11,10 @@ export const patientInclude = {
 export const mapMedicationInput = (medication) => ({
   brand: medication.brand || null,
   genericName: medication.genericName,
+  enteredName: medication.enteredName || medication.brand || medication.genericName,
+  normalizedName: medication.normalizedName || null,
+  mappingSource: medication.mappingSource || null,
+  mappingVersion: medication.mappingVersion || null,
   dosage: medication.dosage || null,
   frequency: medication.frequency || null,
   route: medication.route || null,
@@ -42,7 +46,7 @@ export const patientResponse = (patient) => ({
   updatedAt: patient.updatedAt,
   conditions: patient.conditions?.map((item) => ({ id: item.id, display: item.display, code: item.code, duration: item.duration, source: item.source })) || [],
   allergies: patient.allergies?.map((item) => ({ id: item.id, display: item.display, code: item.code, severity: item.severity, reaction: item.reaction, source: item.source })) || [],
-  medications: patient.medications?.map((item) => ({ id: item.id, brand: item.brand, genericName: item.genericName, dosage: item.dosage, frequency: item.frequency, route: item.route, status: fromMedicationStatus(item.status), source: item.source })) || [],
+  medications: patient.medications?.map((item) => ({ id: item.id, enteredName: item.enteredName || item.brand || item.genericName, normalizedName: item.normalizedName, brand: item.brand, genericName: item.genericName, mappingSource: item.mappingSource, mappingVersion: item.mappingVersion, dosage: item.dosage, frequency: item.frequency, route: item.route, status: fromMedicationStatus(item.status), source: item.source })) || [],
   consultations: patient.consultations?.map(consultationResponse) || [],
 });
 
@@ -50,7 +54,7 @@ export const consultationResponse = (consultation) => ({
   id: consultation.id,
   patientId: consultation.patientId,
   indication: consultation.indication,
-  prescription: { brand: consultation.candidateBrand, generic: consultation.candidateGeneric, dosage: consultation.dosage, frequency: consultation.frequency, route: consultation.route },
+  prescription: { enteredName: consultation.candidateEnteredName || consultation.candidateBrand || consultation.candidateGeneric, normalizedName: consultation.candidateNormalizedName, brand: consultation.candidateBrand, generic: consultation.candidateGeneric, mappingSource: consultation.candidateMappingSource, mappingVersion: consultation.candidateMappingVersion, dosage: consultation.dosage, frequency: consultation.frequency, route: consultation.route },
   status: consultation.status.toLowerCase().replace("_", "-"),
   version: consultation.version,
   createdAt: consultation.createdAt,

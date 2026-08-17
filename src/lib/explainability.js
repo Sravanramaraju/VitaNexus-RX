@@ -1,22 +1,16 @@
 export const getDrugSelectionReasons = () => ['Brand recognized successfully.', 'Mapped to generic drug before analysis.']
 export const getDDIPredictionReasons = (severity) => [
-  `The predicted interaction is classified as ${severity.toLowerCase()}.`,
-  'Both medicines may affect the same clinical pathway.',
-  'Similar combinations informed this prediction.',
-  'Prediction confidence is included with the result.',
+  `The DDInter 2.0 interaction is classified as ${severity.toLowerCase()}.`,
+  'The classification is an ordinal dataset severity, not a patient-specific probability.',
+  'Review the source relationship and the full medication context before prescribing.',
 ]
 export const getDrugDiseaseReasons = () => [
-  'This placeholder assessment represents disease-related safety considerations.',
-  'Patient-specific conditions can be incorporated when clinical data is connected.',
+  'DrugCentral relationship evidence is evaluated against recorded existing conditions.',
+  'The assessment is HIGH, MODERATE, LOW, or NOT_EVALUATED; it is not a probability.',
 ]
 export const getOverallClinicalRiskReasons = () => [
-  'Overall clinical risk summarizes the currently available safety signals.',
-  'Additional patient-specific inputs can refine this assessment when connected.',
+  'The overall assessment summarizes DDInter severity and DrugCentral drug-disease evidence.',
+  'Allergy information remains visible to the clinician but is not an automated input.',
 ]
-export const getReliabilityReasons = (label) => [
-  `Reliability is classified as ${label.toLowerCase()}.`,
-  'Similar medication combinations were seen during model evaluation.',
-  'The confidence interval reflects prediction uncertainty.',
-]
-export const getRankingReasons = () => ['Lowest predicted interaction.', 'Similar therapeutic purpose.', 'High historical success.', 'Positive physician feedback.']
+export const getRankingReasons = () => ['Candidate drugs are identified from DrugCentral indication relationships.', 'Candidate-specific suitability is not represented as a synthetic risk percentage.', 'Allergy information is not used for ranking.']
 export const getFeedbackUsageReasons = () => ['Doctor feedback improves future recommendation ranking.', 'Personal identifiers are not used for model decisions.']

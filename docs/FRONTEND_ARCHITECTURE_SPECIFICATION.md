@@ -1,5 +1,7 @@
 # VitaNexus-RX Frontend Architecture Specification
 
+> **Historical frontend design record — not the current runtime contract.** The UI now uses authenticated API persistence, dataset terminology endpoints, persisted DDInter/DrugCentral results, and a dataset-only Clinical Safety → Recommendations flow. Read [CURRENT_SYSTEM_ARCHITECTURE.md](CURRENT_SYSTEM_ARCHITECTURE.md) for the authoritative current frontend/backend contract. Assertions below about browser-local patient persistence, mock DDI results, active ADR workflow stage, or absent backend integration are superseded.
+
 **Document status:** Frontend reference for backend, database, clinical decision support (CDSS), ML, dataset, and API implementation  
 **System scope:** Current React frontend, including the ADR workflow stage  
 **Implementation status:** Frontend prototype with browser-local persistence and mock/placeholder clinical results

@@ -7,7 +7,7 @@ import { useAuth } from '../context/AuthContext'
 export default function Register() {
   const { doctor, register } = useAuth(); const navigate = useNavigate(); const [form, setForm] = useState({ name: '', phone: '', email: '', gender: '', specialty: '', practiceSetting: '', password: '', confirmPassword: '' }); const [error, setError] = useState('')
   if (doctor) return <Navigate to="/dashboard" replace />
-  const submit = (event) => {
+  const submit = async (event) => {
     event.preventDefault(); setError('')
     if (form.phone.length < 7 || form.phone.length > 15) { setError('Enter a valid phone number.'); return }
     if (form.password.length < 8 || !/[A-Za-z]/.test(form.password) || !/\d/.test(form.password) || !/[^A-Za-z0-9]/.test(form.password)) {
@@ -15,7 +15,7 @@ export default function Register() {
     }
     if (form.password !== form.confirmPassword) { setError('Password and confirm password must match.'); return }
     try {
-      register(form.name, form.email, form.password, { phone: form.phone, gender: form.gender, specialty: form.specialty, practiceSetting: form.practiceSetting })
+      await register(form.name, form.email, form.password, { phone: form.phone, gender: form.gender, specialty: form.specialty, practiceSetting: form.practiceSetting })
       navigate('/dashboard')
     } catch (err) { setError(err.message) }
   }

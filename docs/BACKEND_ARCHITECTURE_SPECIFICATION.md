@@ -1,5 +1,9 @@
 # VitaNexus-RX Backend Architecture Specification
 
+> **Historical architecture record — do not use as the current runtime contract.** This file contains pre-dataset and prototype analysis retained for audit/history. The authoritative frontend, backend, PostgreSQL, data-import, DDInter synonym/combination matching, DrugCentral candidate-evaluation, API, and operational documentation is [CURRENT_SYSTEM_ARCHITECTURE.md](CURRENT_SYSTEM_ARCHITECTURE.md), verified 2026-08-15. Statements below about four static DDI pairs, browser-local patient data, static candidates, `DEMONSTRATION_ONLY` result status, ADR participation in recommendations, or Section 15 being locked are superseded.
+
+> **Current locked implementation note (2026-08-11):** Sections describing the earlier demonstration risk scores, static interaction rules, static recommendation candidates, or prototype terminology seed are historical audit context only. The authoritative runtime behavior is the dataset-backed architecture in **Section 15 — Locked clinical-knowledge implementation** below. No percentage/probability field is part of the active DDI or drug-disease contract.
+
 **Document status:** Canonical backend architecture and implementation artifact  
 **Applies to:** `server/`, `prisma/`, `.env.example`, and `docker-compose.yml`  
 **Backend status:** Runnable demonstration REST API with PostgreSQL persistence and explicit clinical-provider boundaries  
@@ -785,6 +789,72 @@ No conformal prediction implementation exists. The legacy response key `conforma
 `rankRecommendations()` is separate from safety analysis and ADR prediction. It receives their outputs and exports `recommendationRankingConfig` with `configId`, `weightsStatus: "PROVISIONAL"`, and this required governance statement: **“Ranking weights are provisional and will be reviewed/finalized after completion and evaluation of the ADR ML model.”**
 
 Current flow is: consultation -> existing persisted safety/ADR results when available (otherwise transient demo fallbacks) -> static candidate list -> hash-derived demo score -> sorted top three -> persisted `RecommendationSet`. The recommendation input hash contains only the ranking-relevant safety fields, ADR fields, consultation ID, and candidate generic name; it excludes allergies and volatile generation timestamps. The POST response includes `ranking` metadata; each item includes `dataStatus: "DEVELOPMENT_PLACEHOLDER"`. It does **not** evaluate candidate-specific safety/ADR, indication suitability, formulary, contraindications, hard exclusions, or allergies.
+
+## 15. Locked clinical-knowledge implementation
+
+This section is the source of truth for the final architecture requested for the project.
+
+### 15.1 Knowledge/data boundary
+
+```text
+data/raw/ddinter/              immutable DDInter 2.0 downloads
+data/raw/durgcentral/          immutable DrugCentral PostgreSQL dump
+data/raw/indian medicne/       immutable Indian Medicine CSV
+        |
+        +-- scripts/processKnowledgeDatasets.js
+        +-- scripts/processDrugcentralKnowledge.js
+        v
+data/processed/ddinter/        interactions.ndjson
+data/processed/drugcentral/    drug-disease.ndjson, drug-indications.ndjson
+data/processed/indian-medicine/ terminology.ndjson
+        |
+        +-- scripts/importClinicalKnowledge.js
+        v
+PostgreSQL knowledge tables    separate from Patient/Consultation rows
+```
+
+Raw downloads are never modified by preprocessing. `npm run data:process:core` processes DDInter and Indian terminology. `npm run data:process:drugcentral` streams the compressed DrugCentral dump and classifies only source relationship labels; it does not contain drug-pair clinical rules. `npm run data:import` upserts processed records while preserving `source` and `datasetVersion`.
+
+### 15.2 Shared drug resolver
+
+`server/services/drugResolver.js` is the only application resolver. Patient medication writes and consultation writes both pass through it. It searches `MedicationTerminology.normalizedBrand` and `normalizedGeneric`, retains the entered string, and returns:
+
+```json
+{
+  "enteredName": "Dolo 650",
+  "normalizedName": "dolo 650",
+  "brand": "Dolo 650 Tablet",
+  "genericName": "Paracetamol",
+  "mappingSource": "Indian Medicine Dataset",
+  "mappingVersion": "Indian Medicine Dataset import YYYY-MM-DD"
+}
+```
+
+Unmapped generic input remains usable: `genericName` is the supplied canonical candidate and `mappingSource` is null. Controllers do not contain brand-specific `if` statements. Clinical engines consume `genericName`, not arbitrary brand strings.
+
+### 15.3 DDInter 2.0 interaction contract
+
+`DrugInteractionKnowledge` stores both original DDInter names/IDs and normalized pair keys. `clinicalKnowledgeRepository.findPairwiseDrugInteraction()` canonicalizes pair order and queries `source = "DDInter 2.0"`. The safety response contains `rawSeverity`, `displaySeverity`, source, dataset version, and evidence identifiers. Display severity is exactly `MAJOR`, `MODERATE`, or `MINOR`; unmatched pairs return `NOT_EVALUATED`/`NO_DATASET_MATCH`. There is no `riskPercentage`, probability, confidence percentage, or risk bar.
+
+### 15.4 DrugCentral drug-disease contract
+
+`DrugDiseaseKnowledge` stores the proposed generic drug, existing disease, source relationship, evidence, and an assessment normalized by relationship semantics: contraindication/avoidance → `HIGH`, warning/caution → `MODERATE`, precaution/monitor → `LOW`. This is an evidence classification, not a patient-specific probability. A consultation can return multiple findings; the service selects the highest ordinal assessment and preserves every matched relationship in `findings`.
+
+### 15.5 DrugCentral indication contract
+
+`DrugIndicationKnowledge` is queried independently by indication. The recommendation route returns candidate generic drugs with their indication relationship, evidence, source, and version. An indication relationship is not treated as a safety score. Candidate entries are explicitly `assessment: "NOT_EVALUATED"` until a future candidate-specific safety/ranking service exists.
+
+### 15.6 Allergy isolation invariant
+
+Patient allergies and severity remain persisted in `PatientAllergy`, returned by patient APIs, visible in the doctor UI, and auditable. They are not selected by `clinicalSafetyAssessment`, `buildAdrPredictionInput`, or `rankRecommendations`. Recommendation input hashes contain consultation, non-allergy safety components, and ADR metadata only. Changing an allergy therefore cannot change DDI findings, drug-disease findings, ADR input, or candidate results.
+
+### 15.7 Active API behavior
+
+`POST/GET /api/v1/consultations/:consultationId/clinical-safety-assessment` returns `drugDrug.severity`, `drugDisease.assessment`, `overall.assessment`, findings, explanations, and provenance. `POST/GET .../adr-predictions` retains the existing ADR demonstration provider and does not consume allergies. `POST/GET .../recommendations` returns DrugCentral indication candidates without synthetic risk fields. `GET /api/v1/terminology/medications?q=` returns entered/normalized/generic names plus mapping source/version. Authentication, clinician ownership checks, audit events, consultation lifecycle, and unrelated API contracts remain unchanged.
+
+### 15.8 Regression evidence
+
+The updated service tests cover DDInter severity/no percentage, DrugCentral HIGH/MODERATE/LOW, indication candidates, shared resolver behavior, generic fallback, allergy invariance, and allergy visibility. `npm run lint`, `npm run build`, and `prisma validate` are the required verification commands. Database migration deployment and DrugCentral import require a PostgreSQL environment and are intentionally not executed against a nonexistent local database.
 
 The production flow is intentionally an extension point: indication-specific candidate source -> normalized candidate -> safety evaluation against patient profile -> ADR provider evaluation where approved -> uncertainty policy -> configurable ranking engine -> exclusions/rationale/versioned result set. Ranking configuration should be stored or supplied as governed data, not permanently encoded in the engine.
 

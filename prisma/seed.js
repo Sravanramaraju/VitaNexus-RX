@@ -1,29 +1,10 @@
-import { PrismaClient } from "@prisma/client";
+import { existsSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 
-const prisma = new PrismaClient();
-
-const medicines = [
-  ["Crocin", "Paracetamol (Acetaminophen)"],
-  ["Dolo 650", "Paracetamol 650mg"],
-  ["Combiflam", "Ibuprofen + Paracetamol"],
-  ["Disprin", "Aspirin"],
-  ["Digene", "Aluminium Hydroxide + Magnesium Hydroxide + Simethicone"],
-  ["Gelusil", "Aluminium Hydroxide + Magnesium Hydroxide + Simethicone"],
-  ["ENO", "Sodium Bicarbonate + Citric Acid + Sodium Carbonate"],
-  ["Benadryl", "Diphenhydramine"],
-  ["Vicks Action 500", "Paracetamol + Phenylephrine + Caffeine"],
-  ["Saridon", "Paracetamol + Propyphenazone + Caffeine"],
-];
-
-await Promise.all(
-  medicines.map(([brand, generic]) =>
-    prisma.medicationTerminology.upsert({
-      where: { brand_generic: { brand, generic } },
-      update: { source: "VitaNexus prototype OTC mapping", version: "2026.08" },
-      create: { brand, generic },
-    }),
-  ),
-);
-
-console.log(`Seeded ${medicines.length} medication terminology records.`);
-await prisma.$disconnect();
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const terminology = path.join(projectRoot, "data", "processed", "indian-medicine", "terminology.ndjson");
+if (!existsSync(terminology)) throw new Error("Processed terminology is missing. Run npm run data:process before npm run db:seed.");
+const child = spawn(process.execPath, [path.join(projectRoot, "scripts", "importClinicalKnowledge.js")], { stdio: "inherit" });
+child.on("exit", (code) => process.exitCode = code || 0);
