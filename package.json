@@ -7,6 +7,7 @@
     "dev": "node scripts/startDevelopment.js",
     "dev:web": "vite",
     "dev:api": "node --watch server/index.js",
+    "postinstall": "prisma generate",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
