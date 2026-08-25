@@ -1,12 +1,15 @@
 import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
+import process from "node:process";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
+import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const prisma = new PrismaClient();
+const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+const prisma = new PrismaClient({ adapter });
 const readNdjson = async function* (file) {
   const reader = readline.createInterface({ input: fs.createReadStream(file, { encoding: "utf8" }), crlfDelay: Infinity });
   for await (const line of reader) if (line.trim()) yield JSON.parse(line);

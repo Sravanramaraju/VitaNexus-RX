@@ -20,9 +20,16 @@
     "data:process": "node scripts/processKnowledgeDatasets.js && node scripts/processDrugcentralKnowledge.js",
     "data:process:core": "node scripts/processKnowledgeDatasets.js",
     "data:process:drugcentral": "node scripts/processDrugcentralKnowledge.js",
-    "data:import": "node scripts/importClinicalKnowledge.js"
+    "data:import": "node scripts/importClinicalKnowledge.js",
+    "ml:preprocess": "node scripts/runMl.js preprocess",
+    "ml:train:lightgbm": "node scripts/runMl.js train-lightgbm",
+    "ml:train:hgnn": "node scripts/runMl.js train-hgnn",
+    "ml:evaluate": "node scripts/runMl.js evaluate",
+    "ml:serve": "node scripts/runMl.js serve",
+    "ml:test": "ml\\.venv\\Scripts\\python.exe -m pytest ml/tests"
   },
   "dependencies": {
+    "@prisma/adapter-pg": "^6.19.3",
     "@prisma/client": "^6.19.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
@@ -34,6 +41,7 @@
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^1.26.0",
     "morgan": "^1.11.0",
+    "pg": "^8.23.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.18.1",

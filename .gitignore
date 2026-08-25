@@ -8,6 +8,12 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+ml/.venv/
+ml/artifacts/*
+!ml/artifacts/.gitkeep
+ml/reports/*.png
+__pycache__/
+*.py[cod]
 dist
 dist-ssr
 *.local

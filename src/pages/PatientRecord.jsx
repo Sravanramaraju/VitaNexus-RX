@@ -21,6 +21,7 @@ import {
 
 export function resolveEntryStep(visit, navigationState) {
   if (navigationState?.entry === "results") return "results";
+  if (navigationState?.entry === "recommendations") return "recommendations";
   if (navigationState?.entry === "followup" && visit?.status === "in-progress")
     return "followup";
   if (visit?.status === "completed") return "results";
@@ -45,12 +46,14 @@ const normalizeSeverity = (severity) => severity || "NOT_EVALUATED";
 const formatDuration = (duration) =>
   /^\d+$/.test(String(duration)) ? `${duration} days` : duration;
 const datasetResultLabel = (value, dataStatus) =>
-  dataStatus === "NO_DATASET_MATCH" || value === "NOT_EVALUATED"
+  dataStatus === "INCOMPLETE_EVIDENCE" || value === "NOT_EVALUATED"
+    ? "REQUIRES CLINICAL REVIEW"
+    : dataStatus === "NO_DATASET_MATCH"
     ? "NO INTERACTION DETECTED"
     : value;
 
 function AssessmentBadge({ severity }) {
-  if (severity === "NO INTERACTION DETECTED") {
+  if (severity === "NO INTERACTION DETECTED" || severity === "NO DOCUMENTED RELATIONSHIP") {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-800 bg-emerald-900 px-2.5 py-1 text-xs font-bold tracking-wide text-emerald-50 dark:border-emerald-400 dark:bg-emerald-950 dark:text-emerald-100">
         <CheckCircle2 size={13} aria-hidden="true" />
@@ -61,7 +64,7 @@ function AssessmentBadge({ severity }) {
   const tone =
     severity === "Contraindicated" || severity === "High" || severity === "HIGH" || severity === "MAJOR"
       ? "bg-danger"
-      : severity === "Moderate" || severity === "MODERATE"
+      : severity === "Moderate" || severity === "MODERATE" || severity === "REQUIRES CLINICAL REVIEW"
         ? "bg-warning text-slate-900"
         : "bg-success";
   return (
@@ -82,6 +85,16 @@ function Metric({ label, children, className = "" }) {
       <div className="mt-1 text-sm font-semibold">{children}</div>
     </div>
   );
+}
+
+const probability = (value) => Number.isFinite(value) ? `${Math.round(value * 100)}%` : "Unavailable";
+const componentEvidenceLabel = (value, complete, noMatchLabel) => value === "NOT_EVALUATED" ? (complete ? noMatchLabel : "REQUIRES CLINICAL REVIEW") : value;
+
+function RecommendationMlDetails({ recommendation }) {
+  const ml = recommendation.ml;
+  const available = ["ok", "DEGRADED_COVERAGE"].includes(ml?.status) && ml?.overall;
+  if (!available) return <div className="mt-3 rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs"><strong>ML-enhanced ranking unavailable.</strong> No zero or LOW risk was substituted. Known safety evidence remains the ranking basis.</div>;
+  return <div className="mt-3 border-t border-border pt-3 dark:border-slate-600">{ml.status === "DEGRADED_COVERAGE" && <div className="mb-3 rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs"><strong>{ml.artifactMode === "FAST_SMOKE" ? "Development smoke model:" : "Degraded ML coverage:"}</strong> {ml.artifactMode === "FAST_SMOKE" ? "pipeline-verification estimates only; not final model results." : "some inputs were outside the trained vocabulary."}</div>}<div className="grid grid-cols-2 gap-x-5 gap-y-4"><Metric label="Calibrated serious-outcome estimate">{probability(ml.overall.calibratedProbability)}</Metric><Metric label="90% bootstrap interval">{probability(ml.overall.uncertainty.lower)} – {probability(ml.overall.uncertainty.upper)}</Metric><Metric label="Conservative upper bound">{probability(ml.overall.conservativeUpperBound)}</Metric><Metric label="Conformal prediction set">&#123;{ml.overall.conformal.predictionSet.join(", ")}&#125;</Metric></div>{ml.specificAdrs?.length > 0 && <p className="mt-3 text-xs"><strong>Top predicted ADRs:</strong> {ml.specificAdrs.slice(0, 3).map((item) => `${item.term} ${probability(item.score)}`).join(" · ")}</p>}<p className="mt-3 text-xs text-slate-500">{recommendation.ranking?.explanation}</p></div>;
 }
 
 function SideEffectField({ value, onChange }) {
@@ -114,6 +127,7 @@ function Results({
   onStageChange,
   onSaveNotes,
   onAddPatient,
+  onOpenAdr,
 }) {
   const [notes, setNotes] = useState(visit.doctorNotes || "");
   const safety = visit.safetyResult;
@@ -187,10 +201,10 @@ function Results({
           <div className="flex flex-wrap justify-end gap-3">
             <button
               type="button"
-              onClick={() => onStageChange("recommendations")}
+              onClick={onOpenAdr}
               className="btn-primary"
             >
-              View Dataset-Evaluated Alternatives
+              Adverse Risk Assessment
               <ChevronRight size={16} />
             </button>
           </div>
@@ -214,9 +228,12 @@ function Results({
                   <Metric label="Assessment"><AssessmentBadge severity={datasetResultLabel(recommendation.assessment, recommendation.dataStatus)} /></Metric>
                   <Metric label="Source">{recommendation.source || "DrugCentral"}</Metric>
                   <Metric label="Indication relationship" className="col-span-2">{recommendation.indicationRelationship || "Candidate lookup pending"}</Metric>
-                  <Metric label="DDInter check"><AssessmentBadge severity={datasetResultLabel(recommendation.drugDrug?.severity, recommendation.dataStatus)} /></Metric>
-                  <Metric label="DrugCentral condition check"><AssessmentBadge severity={datasetResultLabel(recommendation.drugDisease?.assessment, recommendation.dataStatus)} /></Metric>
+                  <Metric label="DDInter check"><AssessmentBadge severity={componentEvidenceLabel(recommendation.drugDrug?.severity, recommendation.drugDrug?.complete, "NO INTERACTION DETECTED")} /></Metric>
+                  <Metric label="DrugCentral condition check"><AssessmentBadge severity={componentEvidenceLabel(recommendation.drugDisease?.assessment, recommendation.drugDisease?.complete, "NO DOCUMENTED RELATIONSHIP")} /></Metric>
+                  <Metric label="Known Safety Evidence"><AssessmentBadge severity={recommendation.knownSafetyEvidence?.tier || recommendation.assessment} /></Metric>
+                  <Metric label="Evidence completeness">{recommendation.knownSafetyEvidence?.label || "Requires Clinical Review"}</Metric>
                 </div>
+                <RecommendationMlDetails recommendation={recommendation} />
               </div>
             );
           }) : <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-600 dark:bg-slate-700/50 dark:text-slate-200">Evaluation completed: DrugCentral has no indication candidate for this exact recorded indication. Choose a dataset indication from the lookup to obtain candidate results.</p>}
@@ -539,7 +556,10 @@ function UpdatedRecommendations({ visit, historical, onBack }) {
                     </Metric>
                     <Metric label="Source">{recommendation.source || "DrugCentral"}</Metric>
                     <Metric label="Indication relationship" className="col-span-2">{recommendation.indicationRelationship || "Candidate lookup pending"}</Metric>
+                    <Metric label="Known Safety Evidence"><AssessmentBadge severity={recommendation.knownSafetyEvidence?.tier || recommendation.assessment} /></Metric>
+                    <Metric label="Evidence completeness">{recommendation.knownSafetyEvidence?.label || "Requires Clinical Review"}</Metric>
                   </div>
+                  <RecommendationMlDetails recommendation={recommendation} />
                 </div>
               );
             })
@@ -564,6 +584,7 @@ function UpdatedRecommendations({ visit, historical, onBack }) {
 function WizardSteps({ activeStep, visitedSteps, onStepChange }) {
   const steps = [
     ["results", "Clinical Safety"],
+    ["adr", "Adverse Risk Assessment"],
     ["recommendations", "Recommendations"],
     ["followup", "Follow-up"],
     ["updated", "Follow-up Recommendation"],
@@ -627,7 +648,8 @@ export default function PatientRecord() {
   );
   const [visitedSteps, setVisitedSteps] = useState(() => ({
     results: true,
-    recommendations: activeVisit?.status === "completed",
+    adr: true,
+    recommendations: Boolean(activeVisit?.recommendations?.length) || activeVisit?.status === "completed" || resolveEntryStep(activeVisit, stateForVisit) === "recommendations",
     followup:
       activeVisit?.status === "completed" ||
       resolveEntryStep(activeVisit, stateForVisit) === "followup",
@@ -654,7 +676,8 @@ export default function PatientRecord() {
       setStep(resolveEntryStep(activeVisit, stateForVisit));
       setVisitedSteps({
         results: true,
-        recommendations: activeVisit.status === "completed",
+        adr: true,
+        recommendations: Boolean(activeVisit.recommendations?.length) || activeVisit.status === "completed" || resolveEntryStep(activeVisit, stateForVisit) === "recommendations",
         followup:
           activeVisit.status === "completed" ||
           resolveEntryStep(activeVisit, stateForVisit) === "followup",
@@ -676,6 +699,10 @@ export default function PatientRecord() {
     submitFeedback(patient.id, activeVisit.id, feedback);
   const startNewPatient = () => navigate("/patients/new");
   const goToVisitedStep = (target) => {
+    if (target === "adr") {
+      navigate(`/patients/${patient.id}/consultations/${activeVisit.id}/adr`);
+      return;
+    }
     if (visitedSteps[target]) setStep(target);
   };
   const advanceToStep = (target) => {
@@ -695,6 +722,7 @@ export default function PatientRecord() {
           saveVisitNotes(patient.id, activeVisit.id, notes)
         }
         onAddPatient={startNewPatient}
+        onOpenAdr={() => navigate(`/patients/${patient.id}/consultations/${activeVisit.id}/adr`)}
       />
     ) : step === "followup" ? (
       <FollowUp

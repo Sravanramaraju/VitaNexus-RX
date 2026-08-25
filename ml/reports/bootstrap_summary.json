@@ -1,0 +1,9 @@
+{
+  "version": "faers-serious-bootstrap-1.0.0-fast-smoke",
+  "replicas": 2,
+  "resamplingUnit": "CASEID",
+  "intervalLevel": 0.9,
+  "lowerPercentile": 5,
+  "upperPercentile": 95,
+  "fastMode": true
+}

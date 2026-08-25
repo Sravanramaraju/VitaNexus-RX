@@ -1,5 +1,5 @@
-// Use the local API directly in development. This avoids a stale Vite proxy
-// process turning a healthy clinical database lookup into an empty dropdown.
+// Prefer the same-origin API path. Vite proxies it during development, so the
+// frontend remains usable when its preferred port is already occupied.
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "/api/v1";
 const TOKEN_KEY = "vitanexus_access_token";
 

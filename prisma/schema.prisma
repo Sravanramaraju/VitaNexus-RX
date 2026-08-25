@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider   = "prisma-client-js"
+  engineType = "client"
 }
 
 datasource db {
@@ -121,6 +122,10 @@ model Consultation {
   clinicianId             String
   clinician               Clinician           @relation(fields: [clinicianId], references: [id])
   indication              String
+  indicationId            String?
+  indicationNormalized    String?
+  indicationSource        String               @default("LEGACY_FREE_TEXT")
+  indicationDatasetVersion String?
   candidateBrand          String?
   candidateGeneric        String
   candidateEnteredName    String?
@@ -142,6 +147,7 @@ model Consultation {
 
   @@index([patientId, createdAt])
   @@index([clinicianId, status])
+  @@index([indicationId])
 }
 
 model ClinicalAnalysis {

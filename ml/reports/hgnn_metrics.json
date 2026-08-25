@@ -1,0 +1,20 @@
+{
+  "version": "faers-specific-adr-hgnn-1.0.0-fast-smoke",
+  "vocabularySize": 15,
+  "validation": {
+    "microAUPRC": 0.2852747305718242,
+    "macroAUPRC": 0.31048480772936565,
+    "microF1": 0.08943645904631531,
+    "microPrecision": 0.6829268292682927,
+    "microRecall": 0.0478515625
+  },
+  "holdout2026": {
+    "microAUPRC": 0.1385339113783714,
+    "macroAUPRC": 0.2101407434845909,
+    "microF1": 0.0594059405940594,
+    "microPrecision": 0.7319587628865979,
+    "microRecall": 0.030959302325581396
+  },
+  "targetLeakageSafeguard": "report-to-ADR target edges are never passed to the encoder",
+  "fastMode": true
+}

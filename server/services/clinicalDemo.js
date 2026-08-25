@@ -82,8 +82,8 @@ export const clinicalSafetyAssessment = async ({ consultation, patient, knowledg
 
 export const adrPrediction = async (input) => adrPredictionProvider.predict(input);
 
-export const recommendations = async ({ consultation, patient, knowledgeRepository }) =>
-  rankRecommendations({ consultation, patient, knowledgeRepository });
+export const recommendations = async ({ consultation, patient, knowledgeRepository, requestId, provider }) =>
+  rankRecommendations({ consultation, patient, knowledgeRepository, requestId, provider });
 
 export const versions = {
   ENGINE_VERSION,

@@ -34,6 +34,15 @@ export const highestDiseaseAssessment = (values) =>
   values.reduce((highest, value) => (assessmentOrder[value] > assessmentOrder[highest] ? value : highest), "NOT_EVALUATED");
 
 export const createClinicalKnowledgeRepository = (client) => ({
+  async hasDdiDrugEvidence(drug) {
+    const terms = ddiTerms(drug);
+    if (!terms.length) return false;
+    const count = await client.drugInteractionKnowledge.count({
+      where: { source: "DDInter 2.0", OR: [{ normalizedDrugA: { in: terms } }, { normalizedDrugB: { in: terms } }] },
+    });
+    return count > 0;
+  },
+
   async findPairwiseDrugInteraction(candidateDrug, existingDrug) {
     const candidateTerms = ddiTerms(candidateDrug);
     const existingTerms = ddiTerms(existingDrug);

@@ -45,6 +45,9 @@ export const profileSchema = z.object({ items: z.array(z.unknown()).max(100), ex
 
 export const consultationSchema = z.object({
   indication: text(),
+  indicationId: z.string().uuid(),
+  indicationSource: z.literal("DrugCentral"),
+  indicationDatasetVersion: text(120),
   candidateBrand: optionalText(),
   candidateGeneric: optionalText(),
   dosage: text(100),

@@ -32,13 +32,13 @@ const allergyAlertClass = {
 };
 
 function IndicationAutocomplete({ value, onChange }) {
-  const [query, setQuery] = useState(value || "");
+  const [query, setQuery] = useState(value?.display || "");
   const [open, setOpen] = useState(false);
   const { items: matches, error } = useTerminologySearch("indications", query);
 
-  useEffect(() => setQuery(value || ""), [value]);
+  useEffect(() => setQuery(value?.display || ""), [value]);
 
-  return <div className="relative"><label className="block text-sm font-semibold">Diagnosis / Treatment Indication <span className="text-danger">*</span></label><input className="input mt-1" value={query} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => { setOpen(false); if (!value) setQuery(""); }, 150)} onChange={(event) => { setQuery(event.target.value); setOpen(true); onChange(""); }} placeholder="Type one or more letters, e.g. D or De" aria-autocomplete="list" aria-required="true" />{open && query && <div className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-lg border border-border bg-card shadow-md dark:border-slate-600 dark:bg-slate-800">{error ? <p className="px-3 py-2 text-xs text-danger">Lookup unavailable: {error}</p> : matches.length ? matches.map((option) => <button type="button" key={option.normalizedName} className="block w-full px-3 py-2 text-left text-sm hover:bg-primary/10" onMouseDown={(event) => event.preventDefault()} onClick={() => { onChange(option.display); setQuery(option.display); setOpen(false) }}>{option.display}<span className="block text-xs text-slate-500">{option.source}</span></button>) : <p className="px-3 py-2 text-xs text-slate-500">No matching dataset indication</p>}</div>}<p className="mt-1 text-xs text-slate-500">Type a prefix to narrow real DrugCentral indications; up to 30 choices are shown.</p></div>
+  return <div className="relative"><label className="block text-sm font-semibold">Diagnosis / Treatment Indication <span className="text-danger">*</span></label><input className="input mt-1" value={query} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => { setOpen(false); if (!value) setQuery(""); }, 150)} onChange={(event) => { setQuery(event.target.value); setOpen(true); onChange(null); }} placeholder="Search DrugCentral indications" aria-autocomplete="list" aria-required="true" />{open && query && <div className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-lg border border-border bg-card shadow-md dark:border-slate-600 dark:bg-slate-800">{error ? <p className="px-3 py-2 text-xs text-danger">Lookup unavailable: {error}</p> : matches.length ? matches.map((option) => <button type="button" key={option.id} className="block w-full px-3 py-2 text-left text-sm hover:bg-primary/10" onMouseDown={(event) => event.preventDefault()} onClick={() => { onChange(option); setQuery(option.display); setOpen(false) }}>{option.display}<span className="block text-xs text-slate-500">{option.source} · {option.datasetVersion}</span></button>) : <p className="px-3 py-2 text-xs text-slate-500">No matching dataset indication</p>}</div>}<p className="mt-1 text-xs text-slate-500">Typing searches DrugCentral; only a selected dataset result can be submitted.</p>{value && <p className="mt-1 text-xs font-semibold text-success">Selected from {value.source} ({value.datasetVersion})</p>}</div>
 }
 
 function CurrentMedicationList({ items = [], onChange }) {
@@ -370,6 +370,7 @@ export default function NewPatient() {
     savedDraft?.consultation || {
       prescription: { medicine: null, dosage: "", frequency: "" },
       indication: "",
+      indicationSelection: null,
       doctorNotes: "",
     },
   );
@@ -401,7 +402,7 @@ export default function NewPatient() {
       navigate("/dashboard");
       return;
     }
-    if (!consultation.prescription?.medicine || !consultation.indication || !consultation.prescription.dosage.trim() || !isValidFrequency(consultation.prescription.frequency)) return;
+    if (!consultation.prescription?.medicine || !consultation.indicationSelection || !consultation.prescription.dosage.trim() || !isValidFrequency(consultation.prescription.frequency)) return;
     const result = existing
       ? await addVisitToPatient(existing.id, consultation)
       : await createPatient(
@@ -522,7 +523,7 @@ export default function NewPatient() {
             onChange={(medicine) => setConsultation({ ...consultation, prescription: { ...consultation.prescription, medicine } })}
           />
           <div className="grid gap-4 md:grid-cols-2"><label className="block text-sm font-semibold">Dosage <span className="text-danger">*</span><input className="input mt-1" placeholder="e.g. 500 mg, 5 mL, 1 Tablet, 2 Capsules" value={consultation.prescription?.dosage || ""} onChange={(event) => setConsultation({ ...consultation, prescription: { ...consultation.prescription, dosage: event.target.value } })} /></label><label className="block text-sm font-semibold">Frequency <span className="text-danger">*</span><input className={`input mt-1 ${(consultation.prescription?.frequency) && !isValidFrequency(consultation.prescription.frequency) ? "border-danger" : ""}`} placeholder="e.g. 1d" value={consultation.prescription?.frequency || ""} onChange={(event) => setConsultation({ ...consultation, prescription: { ...consultation.prescription, frequency: event.target.value } })} /><span className="mt-1 block text-xs font-normal text-slate-500">{frequencyHelp.map(([code, label]) => `${code} = ${label}`).join(" · ")}</span></label></div>
-          <IndicationAutocomplete value={consultation.indication} onChange={(indication) => setConsultation({ ...consultation, indication })} />
+          <IndicationAutocomplete value={consultation.indicationSelection} onChange={(selection) => setConsultation({ ...consultation, indication: selection?.display || "", indicationSelection: selection })} />
           <label className="block text-sm font-semibold">
             Doctor Notes{" "}
             <span className="font-normal text-slate-500">(optional)</span>
@@ -600,7 +601,7 @@ export default function NewPatient() {
         ) : (
           <button
             className="btn-primary"
-            disabled={isPatientEdit ? false : !consultation.prescription?.medicine || !consultation.indication || !consultation.prescription.dosage?.trim() || !isValidFrequency(consultation.prescription.frequency || "")}
+            disabled={isPatientEdit ? false : !consultation.prescription?.medicine || !consultation.indicationSelection || !consultation.prescription.dosage?.trim() || !isValidFrequency(consultation.prescription.frequency || "")}
             onClick={analyze}
           >
             {isPatientEdit ? "Save patient changes" : "Save consultation"}

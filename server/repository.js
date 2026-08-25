@@ -54,6 +54,7 @@ export const consultationResponse = (consultation) => ({
   id: consultation.id,
   patientId: consultation.patientId,
   indication: consultation.indication,
+  indicationProvenance: { id: consultation.indicationId || null, normalizedName: consultation.indicationNormalized || null, source: consultation.indicationSource || "LEGACY_FREE_TEXT", datasetVersion: consultation.indicationDatasetVersion || null },
   prescription: { enteredName: consultation.candidateEnteredName || consultation.candidateBrand || consultation.candidateGeneric, normalizedName: consultation.candidateNormalizedName, brand: consultation.candidateBrand, generic: consultation.candidateGeneric, mappingSource: consultation.candidateMappingSource, mappingVersion: consultation.candidateMappingVersion, dosage: consultation.dosage, frequency: consultation.frequency, route: consultation.route },
   status: consultation.status.toLowerCase().replace("_", "-"),
   version: consultation.version,

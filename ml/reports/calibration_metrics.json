@@ -1,0 +1,39 @@
+{
+  "cohort": "2025Q3",
+  "method": "isotonic",
+  "fastMode": true,
+  "brierBefore": 0.09272918838178122,
+  "brierAfter": 0.032511475960389606,
+  "eceBefore": 0.20611160752680344,
+  "eceAfter": 5.536780416545729e-18,
+  "reliabilityPlotData": [
+    {
+      "meanPredicted": 0.7902912621359254,
+      "fractionPositive": 0.7902912621359224
+    },
+    {
+      "meanPredicted": 0.958333333333335,
+      "fractionPositive": 0.9583333333333334
+    },
+    {
+      "meanPredicted": 0.9751633986927958,
+      "fractionPositive": 0.9751633986928104
+    },
+    {
+      "meanPredicted": 0.9758454106280181,
+      "fractionPositive": 0.9758454106280193
+    },
+    {
+      "meanPredicted": 0.9922239502332814,
+      "fractionPositive": 0.9922239502332815
+    },
+    {
+      "meanPredicted": 0.995283018867929,
+      "fractionPositive": 0.9952830188679245
+    },
+    {
+      "meanPredicted": 1.0,
+      "fractionPositive": 1.0
+    }
+  ]
+}

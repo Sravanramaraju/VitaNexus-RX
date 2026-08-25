@@ -1,0 +1,30 @@
+{
+  "lightgbm": {
+    "auroc": 0.7396637495138079,
+    "auprc": 0.6354707045098551,
+    "f1": 0.4362242772640173,
+    "precision": 0.27916400085306037,
+    "recallSensitivity": 0.9973333333333333,
+    "specificity": 0.014002333722287048,
+    "brier": 0.636399926958842,
+    "ece": 0.6587351896375309,
+    "threshold": 0.19999999999999996,
+    "confusionMatrix": {
+      "tn": 96,
+      "fp": 6760,
+      "fn": 7,
+      "tp": 2618
+    }
+  },
+  "conformal": {
+    "empiricalCoverage": 0.28646767218647823,
+    "averageSetSize": 0.9948317688007594,
+    "singletonRate": 0.9948317688007594,
+    "ambiguousRate": 0.0,
+    "emptyRate": 0.005168231199240586,
+    "classConditionalCoverage_NO_DOCUMENTED_SERIOUS_OUTCOME": 0.01677362893815636,
+    "classConditionalCoverage_SERIOUS_OUTCOME": 0.9908571428571429
+  },
+  "holdoutRows": 9481,
+  "fastMode": true
+}

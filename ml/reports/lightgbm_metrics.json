@@ -1,0 +1,36 @@
+{
+  "validationTuning": [
+    {
+      "params": {
+        "num_leaves": 31,
+        "max_depth": -1,
+        "min_child_samples": 30,
+        "learning_rate": 0.05,
+        "feature_fraction": 0.9,
+        "bagging_fraction": 0.9,
+        "lambda_l1": 0.0,
+        "lambda_l2": 1.0
+      },
+      "auprc": 0.9604970849351284,
+      "bestIteration": 120
+    }
+  ],
+  "holdout2026": {
+    "auroc": 0.7396637495138079,
+    "auprc": 0.6354707045098551,
+    "f1": 0.4362242772640173,
+    "precision": 0.27916400085306037,
+    "recallSensitivity": 0.9973333333333333,
+    "specificity": 0.014002333722287048,
+    "brier": 0.636399926958842,
+    "ece": 0.6587351896375309,
+    "threshold": 0.19999999999999996,
+    "confusionMatrix": {
+      "tn": 96,
+      "fp": 6760,
+      "fn": 7,
+      "tp": 2618
+    }
+  },
+  "fastMode": true
+}
