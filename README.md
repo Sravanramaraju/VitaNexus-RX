@@ -30,16 +30,20 @@ npm run data:import
 py -3.12 -m venv ml\.venv
 ml\.venv\Scripts\python.exe -m pip install -r ml\requirements.txt
 
-# 4. Full FAERS preprocessing and model training (not sampled)
-npm run ml:preprocess
+# 4. Create processed FAERS data only when cohort.parquet does not already exist
+# npm run ml:preprocess
+
+# 5. Required laptop benchmark, then resumable full-data training
+npm run ml:benchmark
 npm run ml:train:lightgbm
+npm run ml:status
 npm run ml:train:hgnn
 npm run ml:evaluate
 
-# 5. Terminal A: internal model service
+# 6. Terminal A: internal model service
 npm run ml:serve
 
-# 6. Terminal B: Express API + Vite
+# 7. Terminal B: Express API + Vite
 npm run dev
 ```
 
@@ -52,6 +56,8 @@ npm run ml:train:hgnn -- --fast
 ```
 
 Never report fast-mode metrics as final research results.
+
+The full LightGBM command refuses to start without a benchmark matching the immutable processed cohort and current configuration. Full training is checkpointed and resumes completed stages/replicas. It never silently switches to `--fast` or reduces the final 2022Q1–2025Q2 fit. See [ML_TRAINING_OPERATIONS.md](docs/ML_TRAINING_OPERATIONS.md) and the exact [Google Colab migration guide](docs/COLAB_ML_TRAINING.md).
 
 ## Environment
 

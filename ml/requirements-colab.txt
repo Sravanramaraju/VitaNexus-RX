@@ -1,17 +1,15 @@
+# Colab supplies a CUDA-compatible PyTorch build. Keep it instead of replacing it
+# with a potentially incompatible generic wheel; colab_common.py reports it.
 numpy==2.3.2
 pandas==2.3.2
 pyarrow==21.0.0
 scipy==1.16.1
 scikit-learn==1.7.1
 lightgbm==4.6.0
-xgboost==3.0.4
-torch==2.8.0
 torch-geometric==2.6.1
 fastapi==0.116.1
-uvicorn[standard]==0.35.0
 pydantic==2.11.7
 joblib==1.5.1
 psutil==7.2.2
 tqdm==4.67.1
 pytest==8.4.1
-httpx==0.28.1

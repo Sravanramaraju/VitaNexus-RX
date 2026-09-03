@@ -11,6 +11,7 @@ node_modules
 ml/.venv/
 ml/artifacts/*
 !ml/artifacts/.gitkeep
+ml/exports/
 ml/reports/*.png
 __pycache__/
 *.py[cod]

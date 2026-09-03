@@ -68,6 +68,12 @@ It is not the probability that an exposed patient experiences any ADR. The point
 
 The HGNN predicts specific MedDRA PT associations. Its report→ADR targets never enter encoder edges. HGNN output is explanatory only and is not another ranking weight.
 
+### Laptop-safe training architecture
+
+The full LightGBM training path is benchmark-gated and resumable. SHA-256 identities bind checkpoints to the immutable processed cohort, manifest, quality audit, pipeline version, and configuration. A development-only vocabulary encodes one disk-backed CSR representation that is reused across temporal stages. Tuning uses a deterministic quarter/class-representative development subset, while the selected final model always fits every 2022Q1–2025Q2 row. Scalable full-development baselines are Prior Dummy, SGD logistic classification, Complement Naive Bayes, and the selected LightGBM under the same 2025Q1–Q2 validation.
+
+Bootstrap resampling remains at CASEID level but is represented by deterministic multiplicity/sample-weight vectors; feature rows are never duplicated. Every tuning model, baseline, final model, calibration object, and bootstrap replica is atomically checkpointed under local AppData by default, avoiding OneDrive locks and sync overhead. Partial full artifacts remain isolated from runtime smoke artifacts until all stages finish. `npm run ml:benchmark` reports measured RAM/timing and projected full cost; `npm run ml:status` reports resumable stage and replica completion.
+
 ### Deterministic ranking
 
 The ranking engine is `vitanexus-lexicographic-p1-p2-p3-1.0.0`:

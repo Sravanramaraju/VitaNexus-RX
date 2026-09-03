@@ -64,7 +64,8 @@ def _write_json(path: Path, value: dict) -> None:
     path.write_text(json.dumps(value, indent=2, default=str), encoding="utf-8")
 
 
-def train_lightgbm_pipeline(cohort_path: Path, *, fast: bool = False, config: TrainConfig | None = None) -> dict:
+def _train_smoke_pipeline(cohort_path: Path, *, config: TrainConfig | None = None) -> dict:
+    fast = True
     config = config or TrainConfig()
     version_suffix = "-fast-smoke" if fast else ""
     ensure_output_directories()
@@ -185,6 +186,21 @@ def train_lightgbm_pipeline(cohort_path: Path, *, fast: bool = False, config: Tr
     _write_json(ARTIFACT_ROOT / "training_manifest.json", runtime_manifest)
     _write_json(REPORT_ROOT / "lightgbm_metrics.json", {"validationTuning": tuning_results, "holdout2026": holdout_metrics, "fastMode": fast})
     return {"baselines": baseline_rows, "calibration": calibration_report, "bootstrap": bootstrap_report, "conformal": conformal_report, "holdout": holdout_metrics}
+
+
+def train_lightgbm_pipeline(cohort_path: Path, *, fast: bool = False, config: TrainConfig | None = None) -> dict:
+    """Use the legacy in-memory path only when smoke mode was explicitly requested."""
+    if fast:
+        return _train_smoke_pipeline(cohort_path, config=config)
+    from vitanexus_ml.models.laptop_lightgbm_pipeline import train_resumable_lightgbm
+
+    return train_resumable_lightgbm(cohort_path, config=config or TrainConfig())
+
+
+def benchmark_lightgbm_pipeline(cohort_path: Path, *, config: TrainConfig | None = None, sample_rows: int | None = None) -> dict:
+    from vitanexus_ml.models.laptop_lightgbm_pipeline import benchmark_lightgbm
+
+    return benchmark_lightgbm(cohort_path, config=config or TrainConfig(), sample_rows=sample_rows)
 
 
 def _git_commit() -> str | None:

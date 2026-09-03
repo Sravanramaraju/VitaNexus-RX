@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+import warnings
 
 import joblib
 import numpy as np
@@ -17,6 +18,12 @@ from vitanexus_ml.normalization import normalize_drug, normalize_indication
 
 class ArtifactsUnavailable(RuntimeError):
     pass
+
+
+def _lightgbm_probability(model, matrix) -> float:
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="X does not have valid feature names, but LGBMClassifier was fitted with feature names")
+        return float(model.predict_proba(matrix)[0, 1])
 
 
 class Predictor:
@@ -47,9 +54,9 @@ class Predictor:
             "age": request["patient"].get("age"), "sex": request["patient"].get("sex"),
             "candidateDrug": candidate, "indication": indication, "currentMedications": current,
         })
-        raw = float(self.serious["model"].predict_proba(matrix)[0, 1])
+        raw = _lightgbm_probability(self.serious["model"], matrix)
         point = float(self.serious["calibrator"].predict([raw])[0])
-        replica_probabilities = [float(item["calibrator"].predict([item["model"].predict_proba(matrix)[0, 1]])[0]) for item in self.bootstrap]
+        replica_probabilities = [float(item["calibrator"].predict([_lightgbm_probability(item["model"], matrix)])[0]) for item in self.bootstrap]
         lower, upper = bootstrap_interval(np.asarray(replica_probabilities))
         conformal_set = prediction_set(point, float(self.serious["qHat"]))
         hgnn_raw = _predict_in_batches(self.hgnn, self._hgnn_frame(request), self.hgnn_metadata["vocabulary"], self.hgnn_metadata["associations"], 1)[0]

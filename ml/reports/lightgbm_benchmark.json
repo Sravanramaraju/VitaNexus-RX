@@ -1,0 +1,105 @@
+{
+  "pipelineVersion": "faers-laptop-training-2.0.2",
+  "benchmarkMode": true,
+  "createdAt": "2026-08-25T17:18:08.289426+00:00",
+  "input": {
+    "files": {
+      "cohort.parquet": {
+        "sha256": "6a0fd3166a6ca8d6b315b009d996c145e7484a7c850dceaaa6ec135e264205a3",
+        "bytes": 114305663
+      },
+      "dataset_manifest.json": {
+        "sha256": "42d4decd9f3dab04b64bc00e6fbba255f4f5a47487109702e475e1f6d93459eb",
+        "bytes": 9133
+      },
+      "data_quality.json": {
+        "sha256": "e50fba1f86f64023b0b988a9014fd55f8e77f008892c0501a8858b88dc4fcc2f",
+        "bytes": 54897
+      }
+    },
+    "cohortPath": "C:\\Users\\srava\\OneDrive\\Documents\\VitaNexus-RX DDI Major Project\\data\\processed\\faers\\cohort.parquet"
+  },
+  "config": {
+    "seed": 20260824,
+    "medication_vocabulary_size": 1000,
+    "candidate_vocabulary_size": 5000,
+    "indication_vocabulary_size": 5000,
+    "interaction_vocabulary_size": 5000,
+    "adr_min_frequency": 500,
+    "adr_max_labels": 100,
+    "bootstrap_replicas": 20,
+    "conformal_alpha": 0.1,
+    "tuning_train_rows": 400000,
+    "tuning_validation_rows": 150000,
+    "benchmark_rows": 120000,
+    "cache_batch_rows": 100000,
+    "training_threads": 8,
+    "lightgbm_estimators": 800,
+    "tuning_early_stopping_rounds": 40
+  },
+  "sampleRows": 119999,
+  "fullRows": 6309764,
+  "sampleTemporalRows": {
+    "development": 91326,
+    "tuningValidation": 13646,
+    "finalFit": 104972,
+    "calibration": 8036
+  },
+  "fullTemporalRows": {
+    "developmentTrain": 4271984,
+    "tuningValidation": 638284,
+    "finalFit": 4910268,
+    "calibration": 375893,
+    "conformal": 326999,
+    "holdout": 696604
+  },
+  "featureCount": 11461,
+  "nnzPerRow": 6.516904307535897,
+  "timingsSeconds": {
+    "fullCohortScanAndSampling": 73.88783580000745,
+    "sampleFeatureTransform": 11.82383629999822,
+    "sampleLightGBM": 21.421871699989424,
+    "sampleWeightedBootstrapReplica": 2.147027500002878,
+    "sampleBaselines": {
+      "Linear Logistic (SGD)": 0.12853470000845846,
+      "Complement Naive Bayes": 0.01062600000295788
+    }
+  },
+  "benchmarkLightGBM": {
+    "estimators": 200,
+    "bestIteration": 200,
+    "projectedFullIterations": 400,
+    "metrics": {
+      "auroc": 0.8252534860099283,
+      "auprc": 0.8430652664696531,
+      "f1": 0.780689160086145,
+      "precision": 0.6961485116824923,
+      "recallSensitivity": 0.8886013890780335,
+      "specificity": 0.5481516738061241,
+      "brier": 0.1733612767095497,
+      "ece": 0.05162005215502896,
+      "threshold": 0.33999999999999997,
+      "confusionMatrix": {
+        "tn": 3455,
+        "fp": 2848,
+        "fn": 818,
+        "tp": 6525
+      }
+    }
+  },
+  "measuredPeakRamGB": 0.6191864013671875,
+  "estimatedFullPeakRamGB": 2.9135209675878286,
+  "estimatedFullRuntime": {
+    "lower": "2h 00m 07s",
+    "likely": "2h 40m 10s",
+    "upper": "8h 00m 29s",
+    "method": "hardware benchmark extrapolation by rows, fitted iterations and configured replicas; estimate, not a guarantee"
+  },
+  "approvedForFullRun": true,
+  "scientificGuards": {
+    "fullFinalFitRequired": true,
+    "tuningSubsetOnly": true,
+    "holdout2026UsedForTraining": false,
+    "silentFastFallback": false
+  }
+}

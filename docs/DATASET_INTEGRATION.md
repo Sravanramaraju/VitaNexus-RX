@@ -56,9 +56,11 @@ No CASEID can cross these partitions because the retained latest case is assigne
 ## Full versus smoke execution
 
 ```powershell
-# Full corpus (publication candidate)
-npm run ml:preprocess
+# Full corpus (publication candidate). Do not preprocess again when the immutable
+# full cohort already exists.
+npm run ml:benchmark
 npm run ml:train:lightgbm
+npm run ml:status
 npm run ml:train:hgnn
 
 # Explicit resource-bounded smoke execution
@@ -67,4 +69,6 @@ npm run ml:train:lightgbm -- --fast
 npm run ml:train:hgnn -- --fast
 ```
 
-Full mode does not silently sample. Fast mode caps table reads and model replicas/labels and writes `-fast-smoke` versions. Its metrics are diagnostic only.
+Full mode does not silently sample its final fit. LightGBM tuning alone uses a deterministic quarter/class-representative subset; the selected model is fitted on every 2022Q1–2025Q2 row. One sparse representation, fitted from development-only vocabulary, is reused for tuning, full-development baselines, final fit, calibration, conformal calibration, and holdout transformation. Fast mode caps table reads and model replicas/labels and writes `-fast-smoke` versions. Its metrics are diagnostic only.
+
+The laptop pipeline fingerprints `cohort.parquet`, `dataset_manifest.json`, and `data_quality.json`, requires a matching benchmark, checkpoints every model/replica, and refuses mismatched input or configuration. The 2026 labels are excluded from benchmark sampling, fitting, tuning, calibration, and conformal construction; they are read only during the final evaluation stage.

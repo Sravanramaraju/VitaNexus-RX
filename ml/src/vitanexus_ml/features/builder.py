@@ -21,6 +21,10 @@ def _items(value) -> list:
 
 def _vocabulary(values, limit: int) -> dict[str, int]:
     counts = Counter(value for value in values if value and value != UNKNOWN)
+    return _vocabulary_from_counts(counts, limit)
+
+
+def _vocabulary_from_counts(counts: Counter, limit: int) -> dict[str, int]:
     ordered = sorted(counts, key=lambda value: (-counts[value], value))[:limit]
     return {UNKNOWN: 0, **{value: index + 1 for index, value in enumerate(ordered)}}
 
@@ -50,10 +54,22 @@ class FeatureBuilder:
         indications = [normalize_indication(value) for value in rows["indication"]]
         medications = [normalize_drug(item) for values in rows["current_medications"] for item in _items(values)]
         interactions = [f"{candidate}::{indication}" for candidate, indication in zip(candidates, indications)]
-        self.candidate_vocabulary = _vocabulary(candidates, self.config.candidate_vocabulary_size)
-        self.indication_vocabulary = _vocabulary(indications, self.config.indication_vocabulary_size)
-        self.medication_vocabulary = _vocabulary(medications, self.config.medication_vocabulary_size)
-        self.interaction_vocabulary = _vocabulary(interactions, self.config.interaction_vocabulary_size)
+        return self.fit_from_counts(
+            Counter(candidates), Counter(indications), Counter(medications), Counter(interactions),
+        )
+
+    def fit_from_counts(
+        self,
+        candidate_counts: Counter,
+        indication_counts: Counter,
+        medication_counts: Counter,
+        interaction_counts: Counter,
+    ) -> "FeatureBuilder":
+        """Fit deterministic vocabularies from streaming training-only counts."""
+        self.candidate_vocabulary = _vocabulary_from_counts(candidate_counts, self.config.candidate_vocabulary_size)
+        self.indication_vocabulary = _vocabulary_from_counts(indication_counts, self.config.indication_vocabulary_size)
+        self.medication_vocabulary = _vocabulary_from_counts(medication_counts, self.config.medication_vocabulary_size)
+        self.interaction_vocabulary = _vocabulary_from_counts(interaction_counts, self.config.interaction_vocabulary_size)
         self.feature_names = self._make_feature_names()
         self.fitted = True
         return self
@@ -61,33 +77,47 @@ class FeatureBuilder:
     def transform(self, rows, *, return_coverage: bool = False):
         if not self.fitted:
             raise RuntimeError("FeatureBuilder must be fitted before transform")
-        matrices = []
+        indices: list[int] = []
+        data: list[float] = []
+        indptr = [0]
         coverage = []
-        for _, row in rows.iterrows():
-            values, item_coverage = self.transform_one({
-                "age": row.get("age_years"), "sex": row.get("sex"),
-                "candidateDrug": row.get("candidate_drug"), "indication": row.get("indication"),
-                "currentMedications": _items(row.get("current_medications")),
-            })
-            matrices.append(values)
-            coverage.append(item_coverage)
-        matrix = sparse.vstack(matrices, format="csr") if matrices else sparse.csr_matrix((0, len(self.feature_names)))
+        columns = ["age_years", "sex", "candidate_drug", "indication", "current_medications"]
+        for age, sex, candidate, indication, medications in rows[columns].itertuples(index=False, name=None):
+            values, item_coverage = self._encoded_values(age, sex, candidate, indication, _items(medications))
+            indices.extend(values[0])
+            data.extend(values[1])
+            indptr.append(len(indices))
+            if return_coverage:
+                coverage.append(item_coverage)
+        matrix = sparse.csr_matrix(
+            (np.asarray(data, dtype=np.float32), np.asarray(indices, dtype=np.int32), np.asarray(indptr, dtype=np.int64)),
+            shape=(len(rows), len(self.feature_names)),
+        )
         return (matrix, coverage) if return_coverage else matrix
 
     def transform_one(self, payload: dict) -> tuple[sparse.csr_matrix, InputCoverage]:
-        age = payload.get("age")
-        age_value = 0.0 if age is None or (isinstance(age, float) and np.isnan(age)) else min(120.0, max(0.0, float(age))) / 120.0
-        sex = normalize_sex(payload.get("sex"))
-        candidate = normalize_drug(payload.get("candidateDrug"))
-        indication = normalize_indication(payload.get("indication"))
-        medications = sorted({normalize_drug(value) for value in payload.get("currentMedications", []) if value})
+        encoded, coverage = self._encoded_values(
+            payload.get("age"), payload.get("sex"), payload.get("candidateDrug"),
+            payload.get("indication"), payload.get("currentMedications", []),
+        )
+        indices, values = encoded
+        matrix = sparse.csr_matrix((values, ([0] * len(indices), indices)), shape=(1, len(self.feature_names)), dtype=np.float32)
+        return matrix, coverage
+
+    def _encoded_values(self, age, sex_value, candidate_value, indication_value, medication_values):
+        age_missing = age is None or (isinstance(age, float) and np.isnan(age))
+        age_value = 0.0 if age_missing else min(120.0, max(0.0, float(age))) / 120.0
+        sex = normalize_sex(sex_value)
+        candidate = normalize_drug(candidate_value)
+        indication = normalize_indication(indication_value)
+        medications = sorted({normalize_drug(value) for value in medication_values if value})
         unknown_medications = [value for value in medications if value not in self.medication_vocabulary]
         known_medications = [value for value in medications if value in self.medication_vocabulary and value != UNKNOWN]
         interaction = f"{candidate}::{indication}"
         offsets = self._offsets()
         indices: list[int] = []
         values: list[float] = []
-        numeric = [age_value, float(age is None), float(len(medications)), float(len(medications) >= 5), float(len(unknown_medications))]
+        numeric = [age_value, float(age_missing), float(len(medications)), float(len(medications) >= 5), float(len(unknown_medications))]
         for index, value in enumerate(numeric):
             if value:
                 indices.append(index)
@@ -99,8 +129,7 @@ class FeatureBuilder:
         indices.append(offsets["interaction"] + self.interaction_vocabulary.get(interaction, 0)); values.append(1.0)
         for medication in known_medications:
             indices.append(offsets["medication"] + self.medication_vocabulary[medication]); values.append(1.0)
-        matrix = sparse.csr_matrix((values, ([0] * len(indices), indices)), shape=(1, len(self.feature_names)), dtype=np.float32)
-        return matrix, InputCoverage(
+        return (indices, values), InputCoverage(
             candidateKnown=candidate in self.candidate_vocabulary and candidate != UNKNOWN,
             indicationKnown=indication in self.indication_vocabulary and indication != UNKNOWN,
             recognizedCurrentMedications=len(known_medications), unknownCurrentMedications=unknown_medications,

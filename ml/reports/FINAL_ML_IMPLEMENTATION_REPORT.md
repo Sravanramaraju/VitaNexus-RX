@@ -71,17 +71,22 @@ DrugCentral indication → consultation → DDInter/DrugCentral safety → Expre
 
 The ADR direct route was verified after an authentication hydration fix. Desktop and 390×844 mobile layouts were visually checked.
 
-Final regression validation passed: 9 Python tests, 32 backend tests across 7 files, ESLint, the Vite production build (2,228 transformed modules), Prisma schema validation/migration deployment, direct model-artifact smoke inference, FastAPI health, and the real HTTP end-to-end workflow. No frontend unit-test runner exists in this repository, so browser visual/navigation QA and the production build are the frontend gates.
+Final regression validation passed: 15 Python tests, 32 backend tests across 7 files, ESLint, the Vite production build (2,228 transformed modules), Prisma schema validation/migration deployment, direct model-artifact smoke inference, FastAPI health, and the real HTTP end-to-end workflow. No frontend unit-test runner exists in this repository, so browser visual/navigation QA and the production build are the frontend gates.
 
 ## Remaining research limitation and exact resume commands
 
-Full uncapped training was not completed in this execution session because it requires reading the entire ~1.2 GB compressed FAERS corpus, fitting four full baselines, 20 independently calibrated LightGBM replicas, and the full HGNN vocabulary/epochs. No full metrics were fabricated.
+Full preprocessing is complete and immutable: 6,309,764 cohort cases with 4,910,268 intended final-fit rows and 696,604 isolated 2026 holdout rows. The earlier in-memory full-training attempt was stopped because repeated pandas feature construction, non-scalable Random Forest/XGBoost baselines, copied bootstrap cohorts, and absent checkpoints were unsuitable for a 16 GB laptop. No partial metrics were retained or fabricated.
+
+The replacement `faers-laptop-training-2.0.2` pipeline uses one memory-mapped CSR representation, development-only vocabulary fitting, deterministic temporal/class subset tuning, scalable full-development baselines, a full 2022Q1–2025Q2 selected-model fit, multiplicity/sample-weight CASEID bootstraps, atomic per-stage/per-replica checkpoints, resume/status support, and delayed artifact promotion. Heavy work state defaults outside OneDrive under local AppData.
+
+The required 119,999-row laptop benchmark passed. It measured 0.62 GB peak RAM, projects 2.91 GB full peak RAM, and estimates 2h40m likely runtime with a conservative 2h00m–8h00m range. The benchmark skipped 2026 row groups before loading label or feature columns. These are capacity/timing estimates, not final research metrics.
 
 Run:
 
 ```powershell
-npm run ml:preprocess
+npm run ml:benchmark
 npm run ml:train:lightgbm
+npm run ml:status
 npm run ml:train:hgnn
 npm run ml:evaluate
 ```
