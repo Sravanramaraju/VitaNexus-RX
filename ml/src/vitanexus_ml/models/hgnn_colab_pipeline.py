@@ -204,6 +204,24 @@ def _evaluate_streaming(model, parquet, window, vocabulary, associations, batch_
     return _multilabel_metrics(target_matrix, probability_matrix), target_matrix, probability_matrix
 
 
+def _restore_cuda_rng_state_all(states) -> None:
+    """Restore CUDA RNG states after a checkpoint was loaded onto a CUDA device.
+
+    ``torch.load(..., map_location=cuda)`` also moves the serialized RNG byte
+    tensors to CUDA.  PyTorch's RNG restoration API intentionally accepts CPU
+    ByteTensors only, so normalize those tensors before handing them back.
+    """
+    cpu_states = []
+    for state in states:
+        if not isinstance(state, torch.Tensor):
+            state = torch.as_tensor(state, dtype=torch.uint8)
+        state = state.detach().cpu().contiguous()
+        if state.dtype != torch.uint8:
+            raise RuntimeError(f"CUDA RNG checkpoint state must use torch.uint8, found {state.dtype}.")
+        cpu_states.append(state)
+    torch.cuda.set_rng_state_all(cpu_states)
+
+
 def _train_epochs(
     *,
     stage: str,
@@ -235,7 +253,7 @@ def _train_epochs(
         if checkpoint.get("torchRngState") is not None:
             torch.set_rng_state(checkpoint["torchRngState"].cpu())
         if device.type == "cuda" and checkpoint.get("cudaRngState") is not None:
-            torch.cuda.set_rng_state_all(checkpoint["cudaRngState"])
+            _restore_cuda_rng_state_all(checkpoint["cudaRngState"])
     state.start(stage, resumedEpoch=start_epoch, totalEpochs=config.epochs)
     for epoch in range(start_epoch, config.epochs):
         model.train()

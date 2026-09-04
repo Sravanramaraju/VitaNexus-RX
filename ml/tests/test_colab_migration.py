@@ -19,6 +19,7 @@ from vitanexus_ml.features.builder import FeatureBuilder
 from vitanexus_ml.models.feature_cache import processed_input_identity
 from vitanexus_ml.models.hgnn_colab_pipeline import (
     PARTITIONS,
+    _restore_cuda_rng_state_all,
     _resume_model,
     _streaming_associations,
     assert_hgnn_target_edge_integrity,
@@ -202,6 +203,18 @@ def test_hgnn_epoch_checkpoint_resume_validates_identity(tmp_path):
     assert best_epoch == 2
     with pytest.raises(RuntimeError, match="identity differs"):
         _resume_model("selection", restored, tmp_path, torch.device("cpu"), {"dataset": "different"})
+
+
+def test_hgnn_cuda_rng_resume_normalizes_states_to_cpu_byte_tensors(monkeypatch):
+    restored = {}
+    monkeypatch.setattr(torch.cuda, "set_rng_state_all", lambda states: restored.setdefault("states", states))
+
+    _restore_cuda_rng_state_all([torch.tensor([1, 2, 3], dtype=torch.uint8)])
+
+    assert len(restored["states"]) == 1
+    assert restored["states"][0].device.type == "cpu"
+    assert restored["states"][0].dtype == torch.uint8
+    assert restored["states"][0].is_contiguous()
 
 
 def test_full_inference_bundle_is_validated_before_local_import(tmp_path):

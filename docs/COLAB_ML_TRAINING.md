@@ -136,6 +136,8 @@ exports/vitanexus_full_inference/inference_bundle_manifest.json exists
 6. LightGBM skips completed replicas and restarts only the incomplete replica.
 7. HGNN restores the latest model, optimizer, AMP scaler and RNG state, then continues at the next epoch. The separate best checkpoint remains intact.
 
+HGNN resume normalizes serialized CUDA RNG state to the CPU `torch.uint8` representation required by PyTorch before restoring it. This keeps GPU checkpoints portable across replacement Colab runtimes. The notebook also streams the training subprocess's combined output so a non-zero exit always includes the originating traceback instead of only a wrapper error.
+
 Never leave the only valuable checkpoint under `/content`.
 
 ## Import final models locally
