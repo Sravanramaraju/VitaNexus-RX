@@ -23,6 +23,10 @@ const tokenFor = (clinician) => jwt.sign({ role: clinician.role }, config.jwtSec
 const send = (res, status, data, requestId) => res.status(status).json({ data, requestId });
 const forbidden = () => Object.assign(new Error("You do not have access to this record."), { status: 404, code: "NOT_FOUND" });
 const conflict = () => Object.assign(new Error("The record has changed. Refresh it and retry your update."), { status: 409, code: "VERSION_CONFLICT" });
+const transaction = (operation) => prisma.$transaction(operation, {
+  maxWait: 5000,
+  timeout: config.databaseTransactionTimeoutMs,
+});
 const knowledgeRepository = createClinicalKnowledgeRepository(prisma);
 const resolveMedication = async (medication) => {
   const resolved = await resolveDrug(prisma, { enteredName: medication.brand || medication.genericName, brand: medication.brand, genericName: medication.genericName });
@@ -74,7 +78,7 @@ const replaceProfileCollection = async (req, res, entity, schema, mapper) => {
   const patient = await getPatient(prisma, req.auth.clinicianId, req.params.patientId, false);
   if (body.expectedVersion && patient.version !== body.expectedVersion) throw conflict();
   const relation = entity === "conditions" ? "conditions" : entity === "allergies" ? "allergies" : "medications";
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await transaction(async (tx) => {
     await tx[entity === "conditions" ? "patientCondition" : entity === "allergies" ? "patientAllergy" : "patientMedication"].deleteMany({ where: { patientId: patient.id } });
     await tx.patient.update({ data: { [relation]: { create: mappedItems.map(mapper) }, version: { increment: 1 } }, where: { id: patient.id } });
     const updated = await getPatient(tx, req.auth.clinicianId, patient.id);
@@ -100,7 +104,7 @@ export const createApp = () => {
   app.post("/api/v1/auth/register", authLimiter, asyncRoute(async (req, res) => {
     const input = registrationSchema.parse(req.body);
     const passwordHash = await bcrypt.hash(input.password, 12);
-    const clinician = await prisma.$transaction(async (tx) => {
+    const clinician = await transaction(async (tx) => {
       const { password, ...profile } = input;
       void password;
       const created = await tx.clinician.create({ data: { ...profile, passwordHash } });
@@ -134,9 +138,9 @@ export const createApp = () => {
   }));
   app.post("/api/v1/patients", authenticate, asyncRoute(async (req, res) => {
     const input = patientCreateSchema.parse(req.body);
-    const patient = await prisma.$transaction(async (tx) => {
+    const resolvedMedications = await Promise.all(input.medications.map(resolveMedication));
+    const patient = await transaction(async (tx) => {
       const number = await tx.patient.count({ where: { clinicianId: req.auth.clinicianId } }) + 1;
-      const resolvedMedications = await Promise.all(input.medications.map(resolveMedication));
       const created = await tx.patient.create({ data: { clinicianId: req.auth.clinicianId, publicId: `P-${String(number).padStart(4, "0")}-${crypto.randomUUID().slice(0, 4).toUpperCase()}`, name: input.name, age: input.age, gender: input.gender, conditions: { create: input.conditions.map(mapConditionInput) }, allergies: { create: input.allergies.map(mapAllergyInput) }, medications: { create: resolvedMedications.map(mapMedicationInput) } }, include: patientInclude });
       await audit(tx, { actorId: req.auth.clinicianId, action: "PATIENT_CREATED", entityType: "Patient", entityId: created.id, requestId: req.requestId });
       return created;
@@ -148,11 +152,12 @@ export const createApp = () => {
     const input = patientUpdateSchema.parse(req.body);
     const existing = await getPatient(prisma, req.auth.clinicianId, req.params.patientId, false);
     if (input.expectedVersion && existing.version !== input.expectedVersion) throw conflict();
-    const patient = await prisma.$transaction(async (tx) => {
+    const resolvedMedications = input.medications ? await Promise.all(input.medications.map(resolveMedication)) : null;
+    const patient = await transaction(async (tx) => {
       const data = { ...(input.name !== undefined ? { name: input.name } : {}), ...(input.age !== undefined ? { age: input.age } : {}), ...(input.gender !== undefined ? { gender: input.gender } : {}), version: { increment: 1 } };
       if (input.conditions) data.conditions = { deleteMany: {}, create: input.conditions.map(mapConditionInput) };
       if (input.allergies) data.allergies = { deleteMany: {}, create: input.allergies.map(mapAllergyInput) };
-      if (input.medications) { const resolvedMedications = await Promise.all(input.medications.map(resolveMedication)); data.medications = { deleteMany: {}, create: resolvedMedications.map(mapMedicationInput) }; }
+      if (resolvedMedications) data.medications = { deleteMany: {}, create: resolvedMedications.map(mapMedicationInput) };
       await tx.patient.update({ where: { id: existing.id }, data });
       const updated = await getPatient(tx, req.auth.clinicianId, existing.id);
       await audit(tx, { actorId: req.auth.clinicianId, action: "PATIENT_UPDATED", entityType: "Patient", entityId: existing.id, requestId: req.requestId });
@@ -162,7 +167,7 @@ export const createApp = () => {
   }));
   app.delete("/api/v1/patients/:patientId", authenticate, asyncRoute(async (req, res) => {
     const patient = await getPatient(prisma, req.auth.clinicianId, req.params.patientId, false);
-    await prisma.$transaction(async (tx) => { await tx.patient.update({ where: { id: patient.id }, data: { deletedAt: new Date(), version: { increment: 1 } } }); await audit(tx, { actorId: req.auth.clinicianId, action: "PATIENT_ARCHIVED", entityType: "Patient", entityId: patient.id, requestId: req.requestId }); });
+    await transaction(async (tx) => { await tx.patient.update({ where: { id: patient.id }, data: { deletedAt: new Date(), version: { increment: 1 } } }); await audit(tx, { actorId: req.auth.clinicianId, action: "PATIENT_ARCHIVED", entityType: "Patient", entityId: patient.id, requestId: req.requestId }); });
     res.status(204).end();
   }));
   app.put("/api/v1/patients/:patientId/conditions", authenticate, asyncRoute((req, res) => replaceProfileCollection(req, res, "conditions", conditionSchema, mapConditionInput)));
@@ -172,13 +177,13 @@ export const createApp = () => {
   app.post("/api/v1/patients/:patientId/consultations", authenticate, asyncRoute(async (req, res) => {
     const input = await resolveConsultationDrug(await resolveConsultationIndication(consultationSchema.parse(req.body)));
     const patient = await getPatient(prisma, req.auth.clinicianId, req.params.patientId, false);
-    const consultation = await prisma.$transaction(async (tx) => { const created = await tx.consultation.create({ data: { patientId: patient.id, clinicianId: req.auth.clinicianId, ...input } }); await audit(tx, { actorId: req.auth.clinicianId, action: "CONSULTATION_CREATED", entityType: "Consultation", entityId: created.id, requestId: req.requestId }); return created; });
+    const consultation = await transaction(async (tx) => { const created = await tx.consultation.create({ data: { patientId: patient.id, clinicianId: req.auth.clinicianId, ...input } }); await audit(tx, { actorId: req.auth.clinicianId, action: "CONSULTATION_CREATED", entityType: "Consultation", entityId: created.id, requestId: req.requestId }); return created; });
     send(res, 201, consultationResponse(consultation), req.requestId);
   }));
   app.get("/api/v1/consultations/:consultationId", authenticate, asyncRoute(async (req, res) => send(res, 200, consultationResponse(await getConsultation(prisma, req.auth.clinicianId, req.params.consultationId)), req.requestId)));
   app.patch("/api/v1/consultations/:consultationId/notes", authenticate, asyncRoute(async (req, res) => {
     const input = noteSchema.parse(req.body); const consultation = await getConsultation(prisma, req.auth.clinicianId, req.params.consultationId, false);
-    const note = await prisma.$transaction(async (tx) => { const created = await tx.doctorNote.create({ data: { consultationId: consultation.id, authorId: req.auth.clinicianId, text: input.text } }); await audit(tx, { actorId: req.auth.clinicianId, action: "CONSULTATION_NOTE_APPENDED", entityType: "Consultation", entityId: consultation.id, requestId: req.requestId }); return created; });
+    const note = await transaction(async (tx) => { const created = await tx.doctorNote.create({ data: { consultationId: consultation.id, authorId: req.auth.clinicianId, text: input.text } }); await audit(tx, { actorId: req.auth.clinicianId, action: "CONSULTATION_NOTE_APPENDED", entityType: "Consultation", entityId: consultation.id, requestId: req.requestId }); return created; });
     send(res, 201, { id: note.id, text: note.text, version: note.version, createdAt: note.createdAt }, req.requestId);
   }));
 
@@ -186,14 +191,14 @@ export const createApp = () => {
     const consultation = await getConsultation(prisma, req.auth.clinicianId, req.params.consultationId);
     const input = { consultation: { id: consultation.id, candidateGeneric: consultation.candidateGeneric }, patient: consultation.patient };
     const inputHash = stableHash(input); const result = await clinicalSafetyAssessment({ ...input, knowledgeRepository });
-    const analysis = await prisma.$transaction(async (tx) => { const created = await tx.clinicalAnalysis.upsert({ where: { consultationId_type_engineVersion: { consultationId: consultation.id, type: "SAFETY", engineVersion: versions.ENGINE_VERSION } }, update: { result, inputHash }, create: { consultationId: consultation.id, type: "SAFETY", result, inputHash, engineVersion: versions.ENGINE_VERSION } }); await audit(tx, { actorId: req.auth.clinicianId, action: "SAFETY_ASSESSMENT_GENERATED", entityType: "Consultation", entityId: consultation.id, requestId: req.requestId, metadata: { engineVersion: versions.ENGINE_VERSION } }); return created; });
+    const analysis = await transaction(async (tx) => { const created = await tx.clinicalAnalysis.upsert({ where: { consultationId_type_engineVersion: { consultationId: consultation.id, type: "SAFETY", engineVersion: versions.ENGINE_VERSION } }, update: { result, inputHash }, create: { consultationId: consultation.id, type: "SAFETY", result, inputHash, engineVersion: versions.ENGINE_VERSION } }); await audit(tx, { actorId: req.auth.clinicianId, action: "SAFETY_ASSESSMENT_GENERATED", entityType: "Consultation", entityId: consultation.id, requestId: req.requestId, metadata: { engineVersion: versions.ENGINE_VERSION } }); return created; });
     send(res, 200, { id: analysis.id, ...result }, req.requestId);
   }));
   app.get("/api/v1/consultations/:consultationId/clinical-safety-assessment", authenticate, asyncRoute(async (req, res) => { const consultation = await getConsultation(prisma, req.auth.clinicianId, req.params.consultationId); const record = consultation.analyses.find((item) => item.type === "SAFETY"); if (!record) throw Object.assign(new Error("No safety assessment has been generated."), { status: 404, code: "ASSESSMENT_NOT_FOUND" }); send(res, 200, activeSafetyResult(record.result), req.requestId); }));
 
   app.post("/api/v1/consultations/:consultationId/adr-predictions", authenticate, asyncRoute(async (req, res) => {
     const consultation = await getConsultation(prisma, req.auth.clinicianId, req.params.consultationId); const input = buildAdrPredictionInput({ consultation, patient: consultation.patient, requestId: req.requestId }); const inputHash = stableHash(input); const result = await adrPrediction(input); const modelVersion = result.versions?.lightgbm || versions.MODEL_VERSION;
-    const prediction = await prisma.$transaction(async (tx) => { const created = await tx.adrPrediction.upsert({ where: { consultationId_modelVersion_inputHash: { consultationId: consultation.id, modelVersion, inputHash } }, update: { result }, create: { consultationId: consultation.id, result, inputHash, modelVersion } }); await audit(tx, { actorId: req.auth.clinicianId, action: "ADR_PREDICTION_GENERATED", entityType: "Consultation", entityId: consultation.id, requestId: req.requestId, metadata: { modelName: versions.MODEL_NAME, modelVersion, providerName: versions.ADR_PROVIDER_NAME, inputContractVersion: ADR_INPUT_CONTRACT_VERSION, status: result.status } }); return created; });
+    const prediction = await transaction(async (tx) => { const created = await tx.adrPrediction.upsert({ where: { consultationId_modelVersion_inputHash: { consultationId: consultation.id, modelVersion, inputHash } }, update: { result }, create: { consultationId: consultation.id, result, inputHash, modelVersion } }); await audit(tx, { actorId: req.auth.clinicianId, action: "ADR_PREDICTION_GENERATED", entityType: "Consultation", entityId: consultation.id, requestId: req.requestId, metadata: { modelName: versions.MODEL_NAME, modelVersion, providerName: versions.ADR_PROVIDER_NAME, inputContractVersion: ADR_INPUT_CONTRACT_VERSION, status: result.status } }); return created; });
     send(res, 200, { id: prediction.id, ...result }, req.requestId);
   }));
   const getAdrPrediction = asyncRoute(async (req, res) => { const consultation = await getConsultation(prisma, req.auth.clinicianId, req.params.consultationId); const record = consultation.adrPredictions[0]; if (!record) throw Object.assign(new Error("No ADR prediction has been generated."), { status: 404, code: "PREDICTION_NOT_FOUND" }); send(res, 200, { id: record.id, ...record.result }, req.requestId); });
@@ -202,12 +207,12 @@ export const createApp = () => {
 
   app.post("/api/v1/consultations/:consultationId/recommendations", authenticate, asyncRoute(async (req, res) => {
     const consultation = await getConsultation(prisma, req.auth.clinicianId, req.params.consultationId); const storedSafety = consultation.analyses.find((item) => item.type === "SAFETY"); const safety = storedSafety?.engineVersion === versions.ENGINE_VERSION ? activeSafetyResult(storedSafety.result) : await clinicalSafetyAssessment({ consultation, patient: consultation.patient, knowledgeRepository }); const result = await recommendations({ consultation, patient: consultation.patient, knowledgeRepository, requestId: req.requestId }); const modelVersions = result.find((item) => item.ml?.versions)?.ml?.versions || { status: "ML_UNAVAILABLE" }; const inputHash = stableHash(buildRecommendationInput({ consultation, patient: consultation.patient, safety, candidates: result, modelVersions })); const recommendationVersion = `${versions.ENGINE_VERSION}|${recommendationRankingConfig.configId}|${stableHash(modelVersions).slice(0, 12)}`;
-    const record = await prisma.$transaction(async (tx) => { const created = await tx.recommendationSet.upsert({ where: { consultationId_engineVersion_inputHash: { consultationId: consultation.id, engineVersion: recommendationVersion, inputHash } }, update: { recommendations: result }, create: { consultationId: consultation.id, recommendations: result, inputHash, engineVersion: recommendationVersion } }); await audit(tx, { actorId: req.auth.clinicianId, action: "RECOMMENDATIONS_GENERATED", entityType: "Consultation", entityId: consultation.id, requestId: req.requestId, metadata: { rankingConfigId: recommendationRankingConfig.configId, weightsStatus: recommendationRankingConfig.weightsStatus, modelVersions } }); return created; });
+    const record = await transaction(async (tx) => { const created = await tx.recommendationSet.upsert({ where: { consultationId_engineVersion_inputHash: { consultationId: consultation.id, engineVersion: recommendationVersion, inputHash } }, update: { recommendations: result }, create: { consultationId: consultation.id, recommendations: result, inputHash, engineVersion: recommendationVersion } }); await audit(tx, { actorId: req.auth.clinicianId, action: "RECOMMENDATIONS_GENERATED", entityType: "Consultation", entityId: consultation.id, requestId: req.requestId, metadata: { rankingConfigId: recommendationRankingConfig.configId, weightsStatus: recommendationRankingConfig.weightsStatus, modelVersions } }); return created; });
     send(res, 200, { id: record.id, status: modelVersions.status === "ML_UNAVAILABLE" ? "ML_ENHANCED_RANKING_UNAVAILABLE" : "ML_ENHANCED_DATASET_BACKED_EVALUATION", disclaimer: "DrugCentral supplies indication candidates. DDInter and DrugCentral known evidence ranks first; FAERS-derived ML only ranks within the same known-safety tier and is not population incidence.", ranking: recommendationRankingConfig, recommendations: result }, req.requestId);
   }));
   app.get("/api/v1/consultations/:consultationId/recommendations", authenticate, asyncRoute(async (req, res) => { const consultation = await getConsultation(prisma, req.auth.clinicianId, req.params.consultationId); const record = consultation.recommendations[0]; if (!record) throw Object.assign(new Error("No recommendations have been generated."), { status: 404, code: "RECOMMENDATIONS_NOT_FOUND" }); send(res, 200, { status: "PERSISTED_ML_ENHANCED_EVALUATION", disclaimer: "Known DDInter/DrugCentral evidence dominates; FAERS-derived ML is used only within a known-safety tier and is not population incidence.", engineVersion: record.engineVersion, ranking: recommendationRankingConfig, recommendations: record.recommendations }, req.requestId); }));
 
-  app.post("/api/v1/consultations/:consultationId/follow-ups", authenticate, asyncRoute(async (req, res) => { const input = followUpSchema.parse(req.body); const consultation = await getConsultation(prisma, req.auth.clinicianId, req.params.consultationId, false); const followUp = await prisma.$transaction(async (tx) => { const created = await tx.followUp.create({ data: { consultationId: consultation.id, authorId: req.auth.clinicianId, ...input } }); await tx.consultation.update({ where: { id: consultation.id }, data: { status: "COMPLETED", version: { increment: 1 } } }); await audit(tx, { actorId: req.auth.clinicianId, action: "FOLLOW_UP_APPENDED", entityType: "Consultation", entityId: consultation.id, requestId: req.requestId }); return created; }); send(res, 201, followUp, req.requestId); }));
+  app.post("/api/v1/consultations/:consultationId/follow-ups", authenticate, asyncRoute(async (req, res) => { const input = followUpSchema.parse(req.body); const consultation = await getConsultation(prisma, req.auth.clinicianId, req.params.consultationId, false); const followUp = await transaction(async (tx) => { const created = await tx.followUp.create({ data: { consultationId: consultation.id, authorId: req.auth.clinicianId, ...input } }); await tx.consultation.update({ where: { id: consultation.id }, data: { status: "COMPLETED", version: { increment: 1 } } }); await audit(tx, { actorId: req.auth.clinicianId, action: "FOLLOW_UP_APPENDED", entityType: "Consultation", entityId: consultation.id, requestId: req.requestId }); return created; }); send(res, 201, followUp, req.requestId); }));
   app.get("/api/v1/consultations/:consultationId/follow-ups", authenticate, asyncRoute(async (req, res) => { const consultation = await getConsultation(prisma, req.auth.clinicianId, req.params.consultationId); send(res, 200, consultation.followUps, req.requestId); }));
 
   const terminologyLimit = (value) => Math.max(1, Math.min(Number(value || 30), 50));

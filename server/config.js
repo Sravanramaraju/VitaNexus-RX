@@ -25,4 +25,5 @@ export const config = Object.freeze({
   jwtExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN || "15m",
   adrMlBaseUrl: process.env.ADR_ML_BASE_URL || "http://127.0.0.1:8000",
   adrMlTimeoutMs: Math.max(1000, Number(process.env.ADR_ML_TIMEOUT_MS || 30000)),
+  databaseTransactionTimeoutMs: Math.max(5000, Number(process.env.DATABASE_TRANSACTION_TIMEOUT_MS || 15000)),
 });
