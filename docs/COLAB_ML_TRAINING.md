@@ -4,6 +4,8 @@
 
 Google Colab is the execution environment for the remaining full LightGBM bootstrap/evaluation work and the corrected full HGNN workflow. Google Drive is persistent storage; `/content` is temporary high-speed storage. FAERS preprocessing is complete and must not be rerun.
 
+Pin **Runtime Version 2026.07** in **Runtime → Change runtime type** for both notebooks. This is Colab's supported past runtime with Python 3.12.13. Use no accelerator for LightGBM and a T4/L4/A100 GPU for HGNN. The notebooks fail immediately with a corrective message on the current default Python 3.13 image, which avoids the inconsistent system NumPy overlay observed during the August 2026 runtime rollout.
+
 - Immutable input: the existing 6,309,764-row cohort plus its manifest and quality report.
 - Development/vocabulary: 2022Q1–2024Q4.
 - Validation/model selection: 2025Q1–2025Q2.
