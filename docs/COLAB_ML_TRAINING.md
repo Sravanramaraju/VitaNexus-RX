@@ -81,6 +81,8 @@ Open `ml/colab/VitaNexus_LightGBM_Resume_Colab.ipynb`. A CPU runtime is sufficie
 
 Drive authorization appears in section 2. The notebook clones the committed branch, installs constrained dependencies, prints resolved paths, verifies file hashes and 6,309,764 rows, checks free disk/RAM, stages data and the finalized sparse cache to `/content`, and imports the run into persistent Drive state. Preflight requires exactly 8/20 completed replicas.
 
+On a fresh Colab runtime, the constrained dependency cell intentionally restarts the Python process once when package versions change. This prevents a partially upgraded in-memory NumPy/SciPy stack. Wait for Colab to reconnect and choose **Runtime -> Run all** again; the second pass detects the exact installed versions and continues without another restart. This restart does not affect Drive checkpoints.
+
 Replica 9 (`bootstrap_08`) restarts; replicas 0–7 are skipped. Every new replica is saved directly to Drive. After 20/20, the pipeline automatically runs 2025Q4 split-conformal calibration, evaluates 2026Q1–Q2, and promotes full LightGBM artifacts.
 
 Success requires:
