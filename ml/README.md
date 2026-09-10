@@ -10,6 +10,7 @@ Source package: `ml/src/vitanexus_ml`.
 - `features/builder.py`: persisted train-only sparse FeatureBuilder with explicit UNKNOWN buckets.
 - `models/lightgbm_pipeline.py`: explicit smoke-mode compatibility and full laptop-pipeline entry point.
 - `models/laptop_lightgbm_pipeline.py`: benchmark-gated, resumable full-data LightGBM, scalable full-development baselines, isotonic calibration, weighted CASEID bootstrap, conformal and temporal evaluation.
+- `models/operating_threshold.py`: calibrated-probability threshold sweep, deterministic disjoint 2025Q4 cohort allocation, sensitivity-constrained selection, and locked-holdout evaluation.
 - `models/feature_cache.py`: immutable-input fingerprinting and one development-vocabulary sparse representation reused by every stage.
 - `training_runtime.py`: atomic checkpoints, stage state, elapsed/ETA progress, and peak-memory measurement.
 - `portable_state.py`: path-independent, checksum-manifested Windows/Colab checkpoint export, verification, and import.
@@ -28,6 +29,7 @@ $env:PYTHONPATH=(Resolve-Path 'ml\src').Path
 ml\.venv\Scripts\python.exe -m vitanexus_ml.cli preprocess
 ml\.venv\Scripts\python.exe -m vitanexus_ml.cli benchmark-lightgbm
 ml\.venv\Scripts\python.exe -m vitanexus_ml.cli train-lightgbm
+ml\.venv\Scripts\python.exe -m vitanexus_ml.cli optimize-lightgbm-threshold
 ml\.venv\Scripts\python.exe -m vitanexus_ml.cli training-status
 ml\.venv\Scripts\python.exe -m vitanexus_ml.cli train-hgnn
 ml\.venv\Scripts\python.exe -m vitanexus_ml.cli evaluate
@@ -38,6 +40,8 @@ ml\.venv\Scripts\python.exe -m vitanexus_ml.cli all
 Add `--fast` only for development smoke testing.
 
 Full training requires a matching benchmark and uses every final-fit row. Only hyperparameter tuning uses a deterministic quarter/class-stratified subset. Checkpoints are bound to SHA-256 identities for `cohort.parquet`, `dataset_manifest.json`, and `data_quality.json`; a mismatch stops execution instead of reusing stale data. The active smoke artifacts are not replaced until all 20 full bootstrap replicas and final temporal evaluation have completed.
+
+Full-mode operating-threshold selection occurs after isotonic calibration. The 2025Q4 population is deterministically split by CASEID and class into non-overlapping conformal and operating-point halves. The selected binary cutoff maximizes specificity subject to sensitivity >=0.90 on the operating-point half; the frozen cutoff is then evaluated once on 2026Q1-Q2. The threshold is offline evaluation metadata and is not consumed by live inference, recommendation ranking, clinical safety tiers, or frontend probability displays.
 
 Absolute filesystem paths are informational only and no longer participate in dataset, feature-cache, or run identity. Separate environment overrides for cache, run, artifact, report, and processed-data roots support Colab `/content` performance storage with persistent Google Drive checkpoints and outputs.
 

@@ -4,6 +4,18 @@
 **Research metric status:** FAST SMOKE ONLY — not publication/final results
 **Date:** 2026-08-24
 
+## Full LightGBM calibrated operating-point audit — 2026-09-10
+
+The completed full LightGBM was evaluated without retraining or changing its features, trees, class-balanced sample weights, isotonic calibrator, bootstrap models, or live inference contract. The previous `0.35` cutoff had been selected on raw validation probabilities and then applied to calibrated probabilities. The corrected method selects on the calibrated scale.
+
+The 326,999-row 2025Q4 population was deterministically divided by CASEID and class into 163,500 conformal-calibration rows and 163,499 operating-threshold rows with zero overlap. A `0.001` threshold grid selected `0.389` by maximizing specificity subject to sensitivity >=0.90. On the operating cohort, sensitivity was 0.9068 and specificity was 0.5826.
+
+That frozen threshold was evaluated once on the 696,604-row 2026Q1-Q2 holdout. Sensitivity was 0.9018, specificity was 0.5404, precision was 0.6907, F1 was 0.7823, accuracy was 0.7328, and balanced accuracy was 0.7211. Relative to the old `0.35` evaluation, specificity improved by 1.45 percentage points while sensitivity remained above 0.90. AUROC (0.8177), AUPRC (0.8212), Brier score (0.1743), ECE (0.0358), and calibrated probabilities were unchanged because they are threshold-independent for the frozen predictions.
+
+The 2026 labels were never used in threshold selection. The full reproducibility record is in `lightgbm_operating_threshold.json`, and the complete 1,001-row sweep is in `lightgbm_threshold_sweep.csv`. The binary threshold remains an offline evaluation decision layer: calibrated risk display, bootstrap uncertainty, conformal output, HGNN, DDInter/DrugCentral logic, Overall Clinical Risk, and alternative ranking remain independent of it.
+
+The holdout improvement is real but modest. Retraining may be considered only if 54.04% holdout specificity is inadequate for the approved use case; no retraining or class-weight change was performed in this audit.
+
 ## What existed before modification
 
 The repository already had working React/Express/PostgreSQL persistence, Indian medicine resolution, DDInter pairwise DDI lookup, DrugCentral disease/indication knowledge, ADR JSON persistence, and an ADR provider seam. The active ADR provider generated deterministic placeholder numbers; the frontend also retained a static ADR adapter. Recommendations used known datasets only and an ordinal sort. Indication text was searchable but free text remained submittable. The actual knowledge engine constant was `vitanexus-knowledge-2.2.0`, despite stale documentation mentioning 2.1.0.
