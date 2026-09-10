@@ -12,6 +12,8 @@ ml/.venv/
 ml/artifacts/*
 !ml/artifacts/.gitkeep
 ml/exports/
+ml/training_state/
+ml/.pytest-*/
 ml/reports/*.png
 __pycache__/
 *.py[cod]

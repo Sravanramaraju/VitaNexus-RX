@@ -62,6 +62,38 @@ def training_status() -> dict:
     }
 
 
+def hgnn_training_status() -> dict:
+    states = sorted(
+        (TRAINING_RUN_ROOT / "hgnn").glob("*/state.json"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    if not states:
+        return {"status": "NOT_STARTED", "message": "No resumable full HGNN training run exists."}
+    state_path = states[0]
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    stages = state.get("stages", {})
+    selection = stages.get("hgnn_selection", {})
+    completed_epochs = int(selection.get("completedEpoch", selection.get("epochs", 0)) or 0)
+    total_epochs = int(selection.get("totalEpochs", state.get("identity", {}).get("hgnnConfig", {}).get("epochs", 20)) or 20)
+    promoted = stages.get("promoted", {}).get("status") == "complete"
+    return {
+        "status": "COMPLETE" if promoted else "IN_PROGRESS_OR_INTERRUPTED",
+        "run": state_path.parent.name,
+        "statePath": str(state_path),
+        "updatedAt": state.get("updatedAt"),
+        "currentOrLastStage": next(reversed(stages), None),
+        "selection": {
+            "completedEpochs": completed_epochs,
+            "totalEpochs": total_epochs,
+            "resumeAtEpoch": min(completed_epochs + 1, total_epochs) if not promoted else None,
+            "bestEpoch": selection.get("bestEpoch"),
+            "bestValidationMicroAUPRC": selection.get("bestValidationMicroAUPRC"),
+        },
+        "stages": stages,
+    }
+
+
 def hgnn(fast: bool) -> dict:
     if fast:
         from vitanexus_ml.models.hgnn import train_hgnn
@@ -81,6 +113,7 @@ def main(argv: list[str] | None = None) -> int:
     benchmark_parser = subparsers.add_parser("benchmark-lightgbm")
     benchmark_parser.add_argument("--sample-rows", type=int, default=None, help="Deterministic temporal benchmark size; never used as final training data")
     subparsers.add_parser("training-status")
+    subparsers.add_parser("hgnn-training-status")
     plan_parser = subparsers.add_parser("training-export-plan")
     plan_parser.add_argument("--source-root", type=Path, required=True)
     plan_parser.add_argument("--run-key", default=None)
@@ -124,6 +157,8 @@ def main(argv: list[str] | None = None) -> int:
         result = benchmark_lightgbm_pipeline(cohort_path(False), config=TrainConfig(), sample_rows=args.sample_rows)
     elif args.command == "training-status":
         result = training_status()
+    elif args.command == "hgnn-training-status":
+        result = hgnn_training_status()
     elif args.command == "training-export-plan":
         from vitanexus_ml.portable_state import inspect_training_state
 

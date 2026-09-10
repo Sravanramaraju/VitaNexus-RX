@@ -13,7 +13,7 @@ import pytest
 import torch
 
 from vitanexus_ml.artifact_bundle import export_inference_bundle, import_inference_bundle, verify_inference_bundle
-from vitanexus_ml.cli import training_status
+from vitanexus_ml.cli import hgnn_training_status, training_status
 from vitanexus_ml.config import TRAINING_PIPELINE_VERSION, TrainConfig
 from vitanexus_ml.features.builder import FeatureBuilder
 from vitanexus_ml.models.feature_cache import processed_input_identity
@@ -182,6 +182,31 @@ def test_training_status_does_not_count_bootstrap_unit_audit(tmp_path, monkeypat
     status = training_status()
     assert status["bootstrap"]["completed"] == 1
     assert status["bootstrap"]["estimatedRemainingSeconds"] == 190
+
+
+def test_hgnn_training_status_reports_exact_resume_epoch(tmp_path, monkeypatch):
+    run = tmp_path / "runs" / "hgnn" / "run-key"
+    run.mkdir(parents=True)
+    (run / "state.json").write_text(json.dumps({
+        "identity": {"hgnnConfig": {"epochs": 20}},
+        "updatedAt": "test",
+        "stages": {
+            "temporal_preflight": {"status": "complete"},
+            "hgnn_selection": {
+                "status": "running",
+                "completedEpoch": 10,
+                "totalEpochs": 20,
+                "bestEpoch": 10,
+                "bestValidationMicroAUPRC": 0.15,
+            },
+        },
+    }), encoding="utf-8")
+    monkeypatch.setattr("vitanexus_ml.cli.TRAINING_RUN_ROOT", tmp_path / "runs")
+    status = hgnn_training_status()
+    assert status["status"] == "IN_PROGRESS_OR_INTERRUPTED"
+    assert status["run"] == "run-key"
+    assert status["selection"]["completedEpochs"] == 10
+    assert status["selection"]["resumeAtEpoch"] == 11
 
 
 def test_hgnn_epoch_checkpoint_resume_validates_identity(tmp_path):
