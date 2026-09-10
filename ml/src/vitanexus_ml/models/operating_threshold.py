@@ -95,6 +95,7 @@ def evaluate_calibrated_operating_threshold(
     selection_fraction: float = 0.5,
     sensitivity_constraint: float = 0.90,
     threshold_step: float = 0.001,
+    conformal_alpha: float = 0.10,
 ) -> tuple[dict, list[dict]]:
     """Select on pre-holdout calibrated scores and evaluate once on holdout."""
     assert_operating_cohort_is_pre_holdout(pool_quarters)
@@ -130,7 +131,7 @@ def evaluate_calibrated_operating_threshold(
 
     conformal_labels = pool_labels[conformal_positions]
     conformal_probabilities = pool_probabilities[conformal_positions]
-    q_hat = conformal_quantile(conformal_probabilities, conformal_labels, alpha=0.10)
+    q_hat = conformal_quantile(conformal_probabilities, conformal_labels, alpha=conformal_alpha)
     legacy_selection = operating_metrics(selection_labels, selection_probabilities, legacy_threshold)
     legacy_holdout = operating_metrics(holdout_labels, holdout_probabilities, legacy_threshold)
     selected_holdout = operating_metrics(holdout_labels, holdout_probabilities, selected["threshold"])
@@ -160,7 +161,7 @@ def evaluate_calibrated_operating_threshold(
         },
         "conformal": {
             "calibrationSubset": "2025Q4 deterministic conformal half",
-            "targetCoverage": 0.90,
+            "targetCoverage": float(1.0 - conformal_alpha),
             "qHat": float(q_hat),
             "holdout2026": conformal_metrics(holdout_probabilities, holdout_labels, q_hat),
         },
@@ -204,6 +205,16 @@ def _write_threshold_sweep(path: Path, sweep: list[dict]) -> None:
     atomic_replace(temporary, path)
 
 
+def write_operating_threshold_artifacts(report_root: Path, report: dict, sweep: list[dict]) -> tuple[Path, Path]:
+    report_root.mkdir(parents=True, exist_ok=True)
+    report_path = report_root / "lightgbm_operating_threshold.json"
+    sweep_path = report_root / "lightgbm_threshold_sweep.csv"
+    report["thresholdSweep"]["artifact"] = sweep_path.name
+    atomic_json(report_path, report)
+    _write_threshold_sweep(sweep_path, sweep)
+    return report_path, sweep_path
+
+
 def optimize_existing_lightgbm_threshold(
     *,
     cohort_path: Path,
@@ -221,11 +232,9 @@ def optimize_existing_lightgbm_threshold(
     if any(artifact.get("dataWindow", {}).get(key) != value for key, value in expected_windows.items()):
         raise RuntimeError("LightGBM artifact temporal windows do not match the locked evaluation design")
 
-    columns = pq.ParquetFile(cohort_path).schema.names
-    pool = pq.read_table(cohort_path, columns=columns, filters=[("quarter", "=", "2025Q4")]).to_pandas()
+    pool = pq.read_table(cohort_path, filters=[("quarter", "=", "2025Q4")]).to_pandas()
     holdout = pq.read_table(
         cohort_path,
-        columns=columns,
         filters=[("quarter", ">=", "2026Q1"), ("quarter", "<=", "2026Q2")],
     ).to_pandas()
     builder = artifact["featureBuilder"]
@@ -244,11 +253,7 @@ def optimize_existing_lightgbm_threshold(
         seed=seed,
         sensitivity_constraint=sensitivity_constraint,
         threshold_step=threshold_step,
+        conformal_alpha=0.10,
     )
-    report_root.mkdir(parents=True, exist_ok=True)
-    report_path = report_root / "lightgbm_operating_threshold.json"
-    sweep_path = report_root / "lightgbm_threshold_sweep.csv"
-    report["thresholdSweep"]["artifact"] = sweep_path.name
-    atomic_json(report_path, report)
-    _write_threshold_sweep(sweep_path, sweep)
+    report_path, sweep_path = write_operating_threshold_artifacts(report_root, report, sweep)
     return {"report": str(report_path), "sweep": str(sweep_path), **report}

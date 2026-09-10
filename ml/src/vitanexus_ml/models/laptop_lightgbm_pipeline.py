@@ -42,7 +42,6 @@ from vitanexus_ml.config import (
     TrainConfig,
     ensure_output_directories,
 )
-from vitanexus_ml.conformal.split import conformal_metrics, conformal_quantile
 from vitanexus_ml.features.builder import FeatureBuilder
 from vitanexus_ml.models.feature_cache import (
     CACHE_COLUMNS,
@@ -55,6 +54,11 @@ from vitanexus_ml.models.feature_cache import (
     processed_input_location,
 )
 from vitanexus_ml.models.metrics import binary_metrics, expected_calibration_error, select_threshold
+from vitanexus_ml.models.operating_threshold import (
+    OPERATING_THRESHOLD_VERSION,
+    evaluate_calibrated_operating_threshold,
+    write_operating_threshold_artifacts,
+)
 from vitanexus_ml.training_runtime import (
     PeakMemoryMonitor,
     ProgressReporter,
@@ -283,7 +287,8 @@ def train_resumable_lightgbm(cohort_path: Path, config: TrainConfig) -> dict:
     print(f"[training] resumable run={run_key}; benchmark estimate={benchmark['estimatedFullRuntime']['likely']}", flush=True)
     if state.is_complete("promoted") and (ARTIFACT_ROOT / "training_manifest.json").exists() and (REPORT_ROOT / "final_temporal_evaluation.json").exists():
         manifest = json.loads((ARTIFACT_ROOT / "training_manifest.json").read_text(encoding="utf-8"))
-        if manifest.get("pipelineVersion") == TRAINING_PIPELINE_VERSION and manifest.get("input") == input_identity:
+        operating_version = manifest.get("operatingThreshold", {}).get("experimentVersion")
+        if manifest.get("pipelineVersion") == TRAINING_PIPELINE_VERSION and manifest.get("input") == input_identity and operating_version == OPERATING_THRESHOLD_VERSION:
             print("[training] complete FULL run resumed; nothing to retrain", flush=True)
             return {
                 "mode": "FULL",
@@ -407,7 +412,7 @@ def train_resumable_lightgbm(cohort_path: Path, config: TrainConfig) -> dict:
     staged_report_root.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(baseline_rows).to_csv(staged_report_root / "lightgbm_baselines.csv", index=False)
     state.complete("baselines", models=[row["model"] for row in baseline_rows])
-    selected_threshold = float(baseline_payloads["LightGBM"]["threshold"])
+    legacy_threshold = float(baseline_payloads["LightGBM"]["threshold"])
     del x_development, y_development, x_validation, y_validation, development_weights, baseline_payloads
     gc.collect()
 
@@ -509,30 +514,49 @@ def train_resumable_lightgbm(cohort_path: Path, config: TrainConfig) -> dict:
 
     conformal_path = staged_report_root / "conformal_metrics.json"
     temporal_path = staged_report_root / "final_temporal_evaluation.json"
-    if state.is_complete("temporal_evaluation") and conformal_path.exists() and temporal_path.exists():
+    operating_path = staged_report_root / "lightgbm_operating_threshold.json"
+    sweep_path = staged_report_root / "lightgbm_threshold_sweep.csv"
+    if state.is_complete("temporal_evaluation") and conformal_path.exists() and temporal_path.exists() and operating_path.exists() and sweep_path.exists():
         print("[temporal_evaluation] resumed from checkpoint", flush=True)
         conformal_report = json.loads(conformal_path.read_text(encoding="utf-8"))
         temporal_report = json.loads(temporal_path.read_text(encoding="utf-8"))
+        operating_report = json.loads(operating_path.read_text(encoding="utf-8"))
         q_hat = float(conformal_report["qHat"])
+        selected_threshold = float(operating_report["selection"]["selectedOperatingPoint"]["threshold"])
         holdout_metrics = temporal_report["lightgbm"]
         holdout_conformal = temporal_report["conformal"]
     else:
         state.start("temporal_evaluation", conformalCohort="2025Q4", holdout="2026Q1-2026Q2")
-        conformal_indices = partition_indices["conformal"]
+        conformal_pool_indices = partition_indices["conformal"]
         holdout_indices = partition_indices["holdout"]
-        x_conformal = cache.features[conformal_indices]
-        y_conformal = np.asarray(cache.labels[conformal_indices], dtype=np.int8)
-        conformal_probabilities = calibrator.predict(_probability(final_model, x_conformal))
-        q_hat = conformal_quantile(conformal_probabilities, y_conformal, config.conformal_alpha)
-        del x_conformal, y_conformal, conformal_probabilities
+        x_conformal_pool = cache.features[conformal_pool_indices]
+        y_conformal_pool = np.asarray(cache.labels[conformal_pool_indices], dtype=np.int8)
+        conformal_pool_probabilities = calibrator.predict(_probability(final_model, x_conformal_pool))
         x_holdout = cache.features[holdout_indices]
         y_holdout = np.asarray(cache.labels[holdout_indices], dtype=np.int8)
         calibrated_holdout = calibrator.predict(_probability(final_model, x_holdout))
-        holdout_metrics = binary_metrics(y_holdout, calibrated_holdout, selected_threshold)
-        holdout_conformal = conformal_metrics(calibrated_holdout, y_holdout, q_hat)
+        operating_report, operating_sweep = evaluate_calibrated_operating_threshold(
+            pool_labels=y_conformal_pool,
+            pool_probabilities=conformal_pool_probabilities,
+            pool_caseids=np.asarray(cache.caseids[conformal_pool_indices]),
+            pool_quarters=np.full(len(conformal_pool_indices), "2025Q4"),
+            holdout_labels=y_holdout,
+            holdout_probabilities=calibrated_holdout,
+            legacy_threshold=legacy_threshold,
+            seed=config.seed,
+            sensitivity_constraint=0.90,
+            threshold_step=0.001,
+            conformal_alpha=config.conformal_alpha,
+        )
+        write_operating_threshold_artifacts(staged_report_root, operating_report, operating_sweep)
+        selected_threshold = float(operating_report["selection"]["selectedOperatingPoint"]["threshold"])
+        holdout_metrics = operating_report["lockedHoldout2026"]["frozenSelectedThreshold"]
+        q_hat = float(operating_report["conformal"]["qHat"])
+        holdout_conformal = operating_report["conformal"]["holdout2026"]
+        del x_conformal_pool, y_conformal_pool, conformal_pool_probabilities, calibrated_holdout, operating_sweep
         conformal_report = {
             "version": CONFORMAL_VERSION,
-            "calibrationCohort": "2025Q4",
+            "calibrationCohort": "2025Q4 deterministic conformal half",
             "alpha": config.conformal_alpha,
             "targetCoverage": 1.0 - config.conformal_alpha,
             "qHat": q_hat,
@@ -542,7 +566,15 @@ def train_resumable_lightgbm(cohort_path: Path, config: TrainConfig) -> dict:
         temporal_report = {"lightgbm": holdout_metrics, "conformal": holdout_conformal, "holdoutRows": len(y_holdout), "fastMode": False}
         atomic_json(conformal_path, conformal_report)
         atomic_json(temporal_path, temporal_report)
-        state.complete("temporal_evaluation", qHat=q_hat, holdoutRows=len(y_holdout), metrics=holdout_metrics, conformal=holdout_conformal)
+        state.complete(
+            "temporal_evaluation",
+            qHat=q_hat,
+            threshold=selected_threshold,
+            thresholdMethod=OPERATING_THRESHOLD_VERSION,
+            holdoutRows=len(y_holdout),
+            metrics=holdout_metrics,
+            conformal=holdout_conformal,
+        )
 
     serious_payload = {
         "featureBuilder": cache.builder,
@@ -576,6 +608,14 @@ def train_resumable_lightgbm(cohort_path: Path, config: TrainConfig) -> dict:
         "temporalRows": partition_counts,
         "tuningSubset": {"developmentTrain": len(tuning_train_indices), "tuningValidation": len(tuning_validation_indices)},
         "tuning": tuning_results,
+        "operatingThreshold": {
+            "experimentVersion": OPERATING_THRESHOLD_VERSION,
+            "threshold": selected_threshold,
+            "sensitivityConstraint": 0.90,
+            "probabilityScale": "calibrated",
+            "selectionCohort": "2025Q4 deterministic operating-threshold half",
+            "holdoutUsedForSelection": False,
+        },
         "featureBuilder": cache.builder.metadata(),
         "featureCache": {key: value for key, value in cache.metadata.items() if key != "identity"},
         "gitCommit": _git_commit(),
@@ -583,7 +623,12 @@ def train_resumable_lightgbm(cohort_path: Path, config: TrainConfig) -> dict:
     }
     staged_manifest = run_root / "training_manifest.json"
     atomic_json(staged_manifest, runtime_manifest)
-    atomic_json(staged_report_root / "lightgbm_metrics.json", {"validationTuning": tuning_results, "holdout2026": holdout_metrics, "fastMode": False})
+    atomic_json(staged_report_root / "lightgbm_metrics.json", {
+        "validationTuning": tuning_results,
+        "operatingThreshold": operating_report["selection"],
+        "holdout2026": holdout_metrics,
+        "fastMode": False,
+    })
     state.complete("staged_final_artifacts")
     assert_input_identity(cohort_path, input_identity)
 
