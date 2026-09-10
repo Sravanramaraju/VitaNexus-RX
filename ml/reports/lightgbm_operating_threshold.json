@@ -1,0 +1,297 @@
+{
+  "experimentVersion": "faers-calibrated-operating-threshold-1.0.0",
+  "createdAt": "2026-09-10T15:21:39.938103+00:00",
+  "methodology": "maximum specificity subject to sensitivity >= 0.90 on calibrated probabilities",
+  "probabilityCalibration": "isotonic",
+  "probabilityScale": "calibrated",
+  "sensitivityConstraint": 0.9,
+  "thresholdSweep": {
+    "lower": 0.0,
+    "upper": 1.0,
+    "step": 0.001,
+    "rows": 1001,
+    "artifact": "lightgbm_threshold_sweep.csv"
+  },
+  "cohortAllocation": {
+    "source": "2025Q4",
+    "groupKey": "CASEID",
+    "method": "deterministic class-stratified SHA-256 group ordering",
+    "seed": 20260824,
+    "selectionFraction": 0.5,
+    "conformal": {
+      "rows": 163500,
+      "classCounts": {
+        "negative": 74061,
+        "positive": 89439,
+        "total": 163500
+      }
+    },
+    "operatingThreshold": {
+      "rows": 163499,
+      "classCounts": {
+        "negative": 74060,
+        "positive": 89439,
+        "total": 163499
+      }
+    },
+    "overlapRows": 0
+  },
+  "selection": {
+    "holdoutUsedForSelection": false,
+    "selectedOperatingPoint": {
+      "auroc": 0.8585310332416014,
+      "auprc": 0.8735997872319208,
+      "f1": 0.8052080851401796,
+      "precision": 0.72405974093218,
+      "recallSensitivity": 0.90684153445365,
+      "specificity": 0.5826357007831487,
+      "brier": 0.15257531756726536,
+      "ece": 0.014581453209153465,
+      "threshold": 0.389,
+      "confusionMatrix": {
+        "tn": 43150,
+        "fp": 30910,
+        "fn": 8332,
+        "tp": 81107
+      },
+      "accuracy": 0.7599862996103952,
+      "balancedAccuracy": 0.7447386176183994,
+      "negativePredictiveValue": 0.8381570257565751,
+      "selectionRule": "maximum specificity subject to sensitivity floor",
+      "sensitivityConstraint": 0.9,
+      "probabilityScale": "calibrated",
+      "thresholdStep": 0.001,
+      "neighborStability": -0.0
+    },
+    "legacyOperatingPoint": {
+      "auroc": 0.8585310332416014,
+      "auprc": 0.8735997872319208,
+      "f1": 0.8034732984035619,
+      "precision": 0.7174019995431624,
+      "recallSensitivity": 0.9130133387001196,
+      "specificity": 0.5656629759654335,
+      "brier": 0.15257531756726536,
+      "ece": 0.014581453209153465,
+      "threshold": 0.3499999999999999,
+      "confusionMatrix": {
+        "tn": 41893,
+        "fp": 32167,
+        "fn": 7780,
+        "tp": 81659
+      },
+      "accuracy": 0.7556743466320895,
+      "balancedAccuracy": 0.7393381573327765,
+      "negativePredictiveValue": 0.8433756769271032
+    },
+    "comparisonScenarios": {
+      "sensitivityAtLeast92": {
+        "auroc": 0.8585310332416014,
+        "auprc": 0.8735997872319208,
+        "f1": 0.7964346559814214,
+        "precision": 0.6933095820042255,
+        "recallSensitivity": 0.9355985643846644,
+        "specificity": 0.5001890359168242,
+        "brier": 0.15257531756726536,
+        "ece": 0.014581453209153465,
+        "threshold": 0.29,
+        "confusionMatrix": {
+          "tn": 37044,
+          "fp": 37016,
+          "fn": 5760,
+          "tp": 83679
+        },
+        "accuracy": 0.7383714885106331,
+        "balancedAccuracy": 0.7178938001507442,
+        "negativePredictiveValue": 0.8654331370899916,
+        "selectionRule": "maximum specificity subject to sensitivity floor",
+        "sensitivityConstraint": 0.92,
+        "probabilityScale": "calibrated",
+        "thresholdStep": 0.001,
+        "neighborStability": -0.0
+      },
+      "sensitivityAtLeast90": {
+        "auroc": 0.8585310332416014,
+        "auprc": 0.8735997872319208,
+        "f1": 0.8052080851401796,
+        "precision": 0.72405974093218,
+        "recallSensitivity": 0.90684153445365,
+        "specificity": 0.5826357007831487,
+        "brier": 0.15257531756726536,
+        "ece": 0.014581453209153465,
+        "threshold": 0.389,
+        "confusionMatrix": {
+          "tn": 43150,
+          "fp": 30910,
+          "fn": 8332,
+          "tp": 81107
+        },
+        "accuracy": 0.7599862996103952,
+        "balancedAccuracy": 0.7447386176183994,
+        "negativePredictiveValue": 0.8381570257565751,
+        "selectionRule": "maximum specificity subject to sensitivity floor",
+        "sensitivityConstraint": 0.9,
+        "probabilityScale": "calibrated",
+        "thresholdStep": 0.001,
+        "neighborStability": -0.0
+      },
+      "sensitivityAtLeast89": {
+        "auroc": 0.8585310332416014,
+        "auprc": 0.8735997872319208,
+        "f1": 0.8052080851401796,
+        "precision": 0.72405974093218,
+        "recallSensitivity": 0.90684153445365,
+        "specificity": 0.5826357007831487,
+        "brier": 0.15257531756726536,
+        "ece": 0.014581453209153465,
+        "threshold": 0.389,
+        "confusionMatrix": {
+          "tn": 43150,
+          "fp": 30910,
+          "fn": 8332,
+          "tp": 81107
+        },
+        "accuracy": 0.7599862996103952,
+        "balancedAccuracy": 0.7447386176183994,
+        "negativePredictiveValue": 0.8381570257565751,
+        "selectionRule": "maximum specificity subject to sensitivity floor",
+        "sensitivityConstraint": 0.89,
+        "probabilityScale": "calibrated",
+        "thresholdStep": 0.001,
+        "neighborStability": -0.0
+      },
+      "sensitivityAtLeast88": {
+        "auroc": 0.8585310332416014,
+        "auprc": 0.8735997872319208,
+        "f1": 0.807398410233545,
+        "precision": 0.7453446122402634,
+        "recallSensitivity": 0.8807231744540972,
+        "specificity": 0.6366054550364569,
+        "brier": 0.15257531756726536,
+        "ece": 0.014581453209153465,
+        "threshold": 0.412,
+        "confusionMatrix": {
+          "tn": 47147,
+          "fp": 26913,
+          "fn": 10668,
+          "tp": 78771
+        },
+        "accuracy": 0.7701453831521905,
+        "balancedAccuracy": 0.7586643147452771,
+        "negativePredictiveValue": 0.8154804116578742,
+        "selectionRule": "maximum specificity subject to sensitivity floor",
+        "sensitivityConstraint": 0.88,
+        "probabilityScale": "calibrated",
+        "thresholdStep": 0.001,
+        "neighborStability": -0.0
+      },
+      "sensitivityAtLeast85": {
+        "auroc": 0.8585310332416014,
+        "auprc": 0.8735997872319208,
+        "f1": 0.8049286285738347,
+        "precision": 0.7604447405845673,
+        "recallSensitivity": 0.8549402385983743,
+        "specificity": 0.6747502025384823,
+        "brier": 0.15257531756726536,
+        "ece": 0.014581453209153465,
+        "threshold": 0.453,
+        "confusionMatrix": {
+          "tn": 49972,
+          "fp": 24088,
+          "fn": 12974,
+          "tp": 76465
+        },
+        "accuracy": 0.7733197144936667,
+        "balancedAccuracy": 0.7648452205684283,
+        "negativePredictiveValue": 0.7938868236266006,
+        "selectionRule": "maximum specificity subject to sensitivity floor",
+        "sensitivityConstraint": 0.85,
+        "probabilityScale": "calibrated",
+        "thresholdStep": 0.001,
+        "neighborStability": -0.0
+      }
+    }
+  },
+  "conformal": {
+    "calibrationSubset": "2025Q4 deterministic conformal half",
+    "targetCoverage": 0.9,
+    "qHat": 0.7082957619477006,
+    "holdout2026": {
+      "empiricalCoverage": 0.873942727862602,
+      "averageSetSize": 1.3182625996979633,
+      "singletonRate": 0.6817374003020368,
+      "ambiguousRate": 0.3182625996979633,
+      "emptyRate": 0.0,
+      "classConditionalCoverage_NO_DOCUMENTED_SERIOUS_OUTCOME": 0.80950012892769,
+      "classConditionalCoverage_SERIOUS_OUTCOME": 0.9305522597346565
+    }
+  },
+  "lockedHoldout2026": {
+    "usedForThresholdSelection": false,
+    "rows": 696604,
+    "classCounts": {
+      "negative": 325764,
+      "positive": 370840,
+      "total": 696604
+    },
+    "legacyThreshold": {
+      "auroc": 0.8177307404429992,
+      "auprc": 0.8212351735842914,
+      "f1": 0.7816088221616337,
+      "precision": 0.6857031232513231,
+      "recallSensitivity": 0.9087045626146046,
+      "specificity": 0.525856141255633,
+      "brier": 0.17429113769613191,
+      "ece": 0.03577332291238326,
+      "threshold": 0.3499999999999999,
+      "confusionMatrix": {
+        "tn": 171305,
+        "fp": 154459,
+        "fn": 33856,
+        "tp": 336984
+      },
+      "accuracy": 0.7296670705307463,
+      "balancedAccuracy": 0.7172803519351187,
+      "negativePredictiveValue": 0.8349783828310449
+    },
+    "frozenSelectedThreshold": {
+      "auroc": 0.8177307404429992,
+      "auprc": 0.8212351735842914,
+      "f1": 0.7822872100285615,
+      "precision": 0.6907393867291256,
+      "recallSensitivity": 0.9018094056736059,
+      "specificity": 0.5403697154995641,
+      "brier": 0.17429113769613191,
+      "ece": 0.03577332291238326,
+      "threshold": 0.389,
+      "confusionMatrix": {
+        "tn": 176033,
+        "fp": 149731,
+        "fn": 36413,
+        "tp": 334427
+      },
+      "accuracy": 0.7327836188135584,
+      "balancedAccuracy": 0.721089560586585,
+      "negativePredictiveValue": 0.8286011504099865
+    },
+    "specificityPercentagePointImprovement": 1.4513574243931182
+  },
+  "metricSemantics": {
+    "thresholdDependent": [
+      "recallSensitivity",
+      "specificity",
+      "precision",
+      "f1",
+      "accuracy",
+      "balancedAccuracy",
+      "negativePredictiveValue",
+      "confusionMatrix"
+    ],
+    "thresholdIndependent": [
+      "auroc",
+      "auprc",
+      "brier",
+      "ece",
+      "calibrated probabilities"
+    ]
+  }
+}
