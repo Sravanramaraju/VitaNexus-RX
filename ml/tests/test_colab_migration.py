@@ -262,6 +262,7 @@ def test_full_inference_bundle_is_validated_before_local_import(tmp_path):
     for name in (
         "lightgbm_baselines.csv", "calibration_metrics.json", "bootstrap_summary.json",
         "conformal_metrics.json", "final_temporal_evaluation.json", "lightgbm_metrics.json",
+        "lightgbm_operating_threshold.json", "lightgbm_threshold_sweep.csv",
         "hgnn_baselines.csv", "hgnn_metrics.json",
     ):
         (reports / name).write_text("{}", encoding="utf-8")
@@ -272,3 +273,5 @@ def test_full_inference_bundle_is_validated_before_local_import(tmp_path):
     assert result["component"] == "all"
     assert (tmp_path / "local-artifacts" / "training_manifest.json").exists()
     assert (tmp_path / "local-artifacts" / "bootstrap" / "replica_19.joblib").exists()
+    assert (tmp_path / "local-reports" / "lightgbm_operating_threshold.json").exists()
+    assert (tmp_path / "local-reports" / "lightgbm_threshold_sweep.csv").exists()

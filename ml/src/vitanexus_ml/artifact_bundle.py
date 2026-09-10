@@ -17,6 +17,8 @@ LIGHTGBM_REPORTS = (
     "conformal_metrics.json",
     "final_temporal_evaluation.json",
     "lightgbm_metrics.json",
+    "lightgbm_operating_threshold.json",
+    "lightgbm_threshold_sweep.csv",
 )
 HGNN_REPORTS = ("hgnn_baselines.csv", "hgnn_metrics.json")
 
