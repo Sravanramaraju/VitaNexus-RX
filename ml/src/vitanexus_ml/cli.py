@@ -112,6 +112,12 @@ def main(argv: list[str] | None = None) -> int:
         command.add_argument("--fast", action="store_true", help="Explicit development smoke mode; outputs are labelled non-final")
     benchmark_parser = subparsers.add_parser("benchmark-lightgbm")
     benchmark_parser.add_argument("--sample-rows", type=int, default=None, help="Deterministic temporal benchmark size; never used as final training data")
+    threshold_parser = subparsers.add_parser("optimize-lightgbm-threshold")
+    threshold_parser.add_argument("--cohort", type=Path, default=PROCESSED_FAERS_ROOT / "cohort.parquet")
+    threshold_parser.add_argument("--artifact", type=Path, default=ARTIFACT_ROOT / "serious_outcome.joblib")
+    threshold_parser.add_argument("--report-root", type=Path, default=REPORT_ROOT)
+    threshold_parser.add_argument("--sensitivity", type=float, default=0.90)
+    threshold_parser.add_argument("--step", type=float, default=0.001)
     subparsers.add_parser("training-status")
     subparsers.add_parser("hgnn-training-status")
     plan_parser = subparsers.add_parser("training-export-plan")
@@ -155,6 +161,17 @@ def main(argv: list[str] | None = None) -> int:
         from vitanexus_ml.models.lightgbm_pipeline import benchmark_lightgbm_pipeline
 
         result = benchmark_lightgbm_pipeline(cohort_path(False), config=TrainConfig(), sample_rows=args.sample_rows)
+    elif args.command == "optimize-lightgbm-threshold":
+        from vitanexus_ml.models.operating_threshold import optimize_existing_lightgbm_threshold
+
+        result = optimize_existing_lightgbm_threshold(
+            cohort_path=args.cohort,
+            serious_artifact_path=args.artifact,
+            report_root=args.report_root,
+            seed=TrainConfig().seed,
+            sensitivity_constraint=args.sensitivity,
+            threshold_step=args.step,
+        )
     elif args.command == "training-status":
         result = training_status()
     elif args.command == "hgnn-training-status":

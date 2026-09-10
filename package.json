@@ -23,6 +23,7 @@
     "data:import": "node scripts/importClinicalKnowledge.js",
     "ml:preprocess": "node scripts/runMl.js preprocess",
     "ml:benchmark": "node scripts/runMl.js benchmark-lightgbm",
+    "ml:optimize:threshold": "node scripts/runMl.js optimize-lightgbm-threshold",
     "ml:status": "node scripts/runMl.js training-status",
     "ml:state:plan": "node scripts/runMl.js training-export-plan",
     "ml:state:export": "node scripts/runMl.js export-training-state",
