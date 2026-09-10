@@ -17,9 +17,8 @@ LIGHTGBM_REPORTS = (
     "conformal_metrics.json",
     "final_temporal_evaluation.json",
     "lightgbm_metrics.json",
-    "lightgbm_operating_threshold.json",
-    "lightgbm_threshold_sweep.csv",
 )
+OPERATING_THRESHOLD_REPORTS = ("lightgbm_operating_threshold.json", "lightgbm_threshold_sweep.csv")
 HGNN_REPORTS = ("hgnn_baselines.csv", "hgnn_metrics.json")
 
 
@@ -42,6 +41,11 @@ def _validated_files(artifact_root: Path, report_root: Path, component: str) -> 
         raise RuntimeError(f"Expected {expected} contiguous bootstrap replicas, found {len(replicas)}.")
     files.extend((path, f"artifacts/bootstrap/{path.name}") for path in replicas)
     files.extend((report_root / name, f"reports/{name}") for name in LIGHTGBM_REPORTS)
+    operating_reports = [report_root / name for name in OPERATING_THRESHOLD_REPORTS]
+    present_operating_reports = [path for path in operating_reports if path.exists()]
+    if present_operating_reports and len(present_operating_reports) != len(operating_reports):
+        raise FileNotFoundError("Operating-threshold report and sweep must be exported together.")
+    files.extend((path, f"reports/{path.name}") for path in present_operating_reports)
 
     if component == "all":
         hgnn_manifest_path = artifact_root / "hgnn_training_manifest.json"
