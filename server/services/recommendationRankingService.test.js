@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { compareRecommendations } from "./recommendationRankingService.js";
 
-const candidate = ({ drug, tier, complete = true, upper = 0.2, set = ["NO_DOCUMENTED_SERIOUS_OUTCOME"], mlStatus = "ok" }) => ({
+const candidate = ({ drug, tier, complete = true, upper = 0.2, set = ["NO_DOCUMENTED_SERIOUS_OUTCOME"], mlStatus = "ok", probability = 0.2, threshold = 0.35 }) => ({
   drug,
   knownSafetyEvidence: { tier, complete },
-  ml: mlStatus ? { status: mlStatus, overall: { conservativeUpperBound: upper, conformal: { predictionSet: set } } } : null,
+  ml: mlStatus ? { status: mlStatus, overall: { calibratedProbability: probability, binaryThreshold: threshold, conservativeUpperBound: upper, conformal: { predictionSet: set } } } : null,
 });
 
 describe("lexicographic P1/P2/P3 ranking", () => {
@@ -12,7 +12,10 @@ describe("lexicographic P1/P2/P3 ranking", () => {
     expect([candidate({ drug: "B", tier: "MODERATE", upper: 0.1 }), candidate({ drug: "A", tier: "LOW", upper: 0.25 })].sort(compareRecommendations)[0].drug).toBe("A");
   });
   it("uses bootstrap upper bound rather than point probability", () => {
-    expect([candidate({ drug: "B", tier: "LOW", upper: 0.29 }), candidate({ drug: "A", tier: "LOW", upper: 0.22 })].sort(compareRecommendations)[0].drug).toBe("A");
+    expect([
+      candidate({ drug: "B", tier: "LOW", upper: 0.29, probability: 0.01, threshold: 0.99 }),
+      candidate({ drug: "A", tier: "LOW", upper: 0.22, probability: 0.99, threshold: 0.01 }),
+    ].sort(compareRecommendations)[0].drug).toBe("A");
   });
   it("uses conformal set only on an exact P1/P2 tie", () => {
     const ambiguous = candidate({ drug: "B", tier: "LOW", upper: 0.2, set: ["NO_DOCUMENTED_SERIOUS_OUTCOME", "SERIOUS_OUTCOME"] });
