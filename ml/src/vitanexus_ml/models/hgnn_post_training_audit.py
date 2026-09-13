@@ -235,6 +235,15 @@ def run_preholdout_audit(
         "version": AUDIT_VERSION,
         "createdAt": utc_now(),
         "referenceReproduction": {"expected": REFERENCE_METRICS, "reproduced": reproduced, "deltas": deltas, "threshold": 0.5},
+        "existingDecisionMethod": {
+            "threshold": 0.5,
+            "scope": "one global threshold for all ADR outputs",
+            "scoreTransform": "sigmoid applied to raw logits before thresholding",
+            "probabilityCalibration": "none on the protected selection checkpoint",
+            "labelMasking": False,
+            "adrOutputs": len(vocabulary),
+            "zeroPositiveLabelPolicy": "excluded from macro AUPRC; retained with zero_division=0 for threshold metrics",
+        },
         "cohorts": {
             "validation": {"window": list(WINDOWS["validation"]), "rows": len(validation["targets"]), "purpose": "reference reproduction only; previously used for epoch selection"},
             "calibration": {"window": list(WINDOWS["calibration"]), "rows": len(calibration["targets"]), "purpose": "calibrator fitting"},
