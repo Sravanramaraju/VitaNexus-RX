@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 import numpy as np
+from joblib import Parallel, delayed
 from scipy.optimize import minimize_scalar
 from scipy.special import expit
 from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import average_precision_score
 
-from vitanexus_ml.models.hgnn_evaluation import expected_calibration_error, multilabel_metrics
+from vitanexus_ml.models.hgnn_evaluation import expected_calibration_error
 
 
 CALIBRATION_METHODS = ("identity", "temperature", "platt", "isotonic")
@@ -45,32 +48,56 @@ def fit_per_label_calibrators(targets, probabilities, *, method: str, minimum_su
         raise ValueError("Per-label HGNN calibration supports only platt or isotonic")
     y = np.asarray(targets, dtype=np.int8)
     p = np.asarray(probabilities, dtype=np.float64)
-    models = []
-    fallbacks = []
-    for index in range(y.shape[1]):
+    def fit_one(index: int):
         labels = y[:, index]
         positives = int(labels.sum())
         negatives = len(labels) - positives
         if min(positives, negatives) < minimum_support:
-            models.append(None)
-            fallbacks.append(index)
-            continue
+            return index, None
         if method == "platt":
             model = LogisticRegression(solver="lbfgs", max_iter=200, random_state=20260824)
             model.fit(p[:, index].reshape(-1, 1), labels)
         else:
             model = IsotonicRegression(out_of_bounds="clip", y_min=0.0, y_max=1.0)
             model.fit(p[:, index], labels)
-        models.append(model)
+        return index, model
+
+    workers = min(4, max(1, os.cpu_count() or 1), y.shape[1])
+    fitted = Parallel(n_jobs=workers, prefer="threads")(
+        delayed(fit_one)(index) for index in range(y.shape[1])
+    )
+    models = [None] * y.shape[1]
+    fallbacks = []
+    for index, model in fitted:
+        models[index] = model
+        if model is None:
+            fallbacks.append(index)
     return CalibrationBundle(method, models, minimum_support, fallbacks)
+
+
+def fit_calibration_candidate(
+    method: str,
+    targets,
+    logits,
+    probabilities,
+    *,
+    minimum_support: int,
+) -> CalibrationBundle:
+    if method == "identity":
+        return CalibrationBundle("identity", None, 0, [])
+    if method == "temperature":
+        return fit_temperature(targets, logits)
+    if method in {"platt", "isotonic"}:
+        return fit_per_label_calibrators(targets, probabilities, method=method, minimum_support=minimum_support)
+    raise ValueError(f"Unknown HGNN calibration method: {method}")
 
 
 def fit_calibration_candidates(targets, logits, probabilities, *, minimum_support: int) -> dict[str, CalibrationBundle]:
     return {
-        "identity": CalibrationBundle("identity", None, 0, []),
-        "temperature": fit_temperature(targets, logits),
-        "platt": fit_per_label_calibrators(targets, probabilities, method="platt", minimum_support=minimum_support),
-        "isotonic": fit_per_label_calibrators(targets, probabilities, method="isotonic", minimum_support=minimum_support),
+        method: fit_calibration_candidate(
+            method, targets, logits, probabilities, minimum_support=minimum_support,
+        )
+        for method in CALIBRATION_METHODS
     }
 
 
@@ -97,7 +124,8 @@ def apply_calibration(bundle: CalibrationBundle, logits, probabilities) -> np.nd
 def calibration_diagnostics(targets, probabilities) -> dict:
     y = np.asarray(targets, dtype=np.int8)
     p = np.asarray(probabilities, dtype=np.float64)
-    metrics = multilabel_metrics(y, p, 0.5)
+    positives = y.sum(axis=0)
+    valid_ap = positives > 0
     per_label = []
     for index in range(y.shape[1]):
         labels = y[:, index]
@@ -109,10 +137,10 @@ def calibration_diagnostics(targets, probabilities) -> dict:
             "ece": expected_calibration_error(labels[:, None], scores[:, None]),
         })
     return {
-        "brier": metrics["brier"],
-        "ece": metrics["ece"],
-        "microAUPRC": metrics["microAUPRC"],
-        "macroAUPRC": metrics["macroAUPRC"],
+        "brier": float(np.mean((p - y) ** 2)),
+        "ece": expected_calibration_error(y, p),
+        "microAUPRC": float(average_precision_score(y, p, average="micro")),
+        "macroAUPRC": float(average_precision_score(y[:, valid_ap], p[:, valid_ap], average="macro")),
         "negativeLogLikelihood": _binary_nll(y, p),
         "perLabel": per_label,
     }

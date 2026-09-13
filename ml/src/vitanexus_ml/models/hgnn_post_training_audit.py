@@ -12,14 +12,16 @@ from vitanexus_ml.models.hgnn_calibration import (
     apply_calibration,
     calibration_diagnostics,
     choose_calibration,
-    fit_calibration_candidates,
+    fit_calibration_candidate,
 )
 from vitanexus_ml.models.hgnn_evaluation import (
     global_candidates,
     global_threshold_sweep,
+    multilabel_decision_metrics,
     multilabel_metrics,
     per_label_metrics,
     precision_recall_frontier,
+    probability_metrics,
     score_distributions,
     top_k_metrics,
 )
@@ -82,13 +84,14 @@ def _configuration_candidates(
         y, raw, vocabulary, folds,
         global_threshold=raw_threshold, minimum_support=minimum_support,
     )
+    raw_quality = probability_metrics(y, raw)
     candidates = [
         {"name": "A-existing-global-0.5", "calibration": "identity", "thresholdType": "global", "thresholds": 0.5,
-         "metrics": multilabel_metrics(y, raw, 0.5)},
+         "metrics": {**raw_quality, **multilabel_decision_metrics(y, raw, 0.5)}},
         {"name": "B-optimized-global", "calibration": "identity", "thresholdType": "global", "thresholds": raw_threshold,
-         "metrics": multilabel_metrics(y, raw, raw_threshold)},
+         "metrics": {**raw_quality, **multilabel_decision_metrics(y, raw, raw_threshold)}},
         {"name": "C-stable-per-label", "calibration": "identity", "thresholdType": "per-label", "thresholds": raw_per_label.tolist(),
-         "metrics": multilabel_metrics(y, raw, raw_per_label)},
+         "metrics": {**raw_quality, **multilabel_decision_metrics(y, raw, raw_per_label)}},
     ]
     details = {
         "rawGlobalCandidates": raw_globals,
@@ -98,6 +101,7 @@ def _configuration_candidates(
         "rawPerLabelStability": raw_per_label_stability,
     }
     if calibration_choice["adopted"]:
+        calibrated_quality = probability_metrics(y, calibrated)
         calibrated_sweep = global_threshold_sweep(y, calibrated, step=0.001)
         calibrated_globals = global_candidates(calibrated_sweep)
         calibrated_threshold = calibrated_globals["G1MaximumMicroF1"]["threshold"]
@@ -107,9 +111,9 @@ def _configuration_candidates(
         )
         calibrated_options = [
             {"name": "D-calibrated-global", "calibration": calibration_choice["method"], "thresholdType": "global",
-             "thresholds": calibrated_threshold, "metrics": multilabel_metrics(y, calibrated, calibrated_threshold)},
+             "thresholds": calibrated_threshold, "metrics": {**calibrated_quality, **multilabel_decision_metrics(y, calibrated, calibrated_threshold)}},
             {"name": "D-calibrated-stable-per-label", "calibration": calibration_choice["method"], "thresholdType": "per-label",
-             "thresholds": calibrated_per_label.tolist(), "metrics": multilabel_metrics(y, calibrated, calibrated_per_label)},
+             "thresholds": calibrated_per_label.tolist(), "metrics": {**calibrated_quality, **multilabel_decision_metrics(y, calibrated, calibrated_per_label)}},
         ]
         candidates.extend(calibrated_options)
         details.update({
@@ -174,27 +178,65 @@ def run_preholdout_audit(
     raw = operating["probabilities"]
     logits = operating["logits"]
     minimum_support = max(200, int(math.ceil(math.sqrt(len(y)))))
-    calibrators = fit_calibration_candidates(
-        calibration["targets"], calibration["logits"], calibration["probabilities"],
-        minimum_support=minimum_support,
-    )
+    stage_root = work_root / "calibration_stages"
+    stage_root.mkdir(parents=True, exist_ok=True)
+    stage_identity = {
+        "auditVersion": AUDIT_VERSION,
+        "checkpointSha256": integrity["files"]["hgnn_selection_best.pt"]["sha256"],
+        "calibrationCache": calibration["metadata"]["identity"],
+        "operatingCache": operating["metadata"]["identity"],
+        "minimumSupport": minimum_support,
+    }
     calibration_results = {}
-    calibrated_by_method = {}
-    for method, bundle in calibrators.items():
-        values = apply_calibration(bundle, logits, raw)
-        calibrated_by_method[method] = values
-        calibration_results[method] = calibration_diagnostics(y, values)
+    for method in ("identity", "temperature", "platt", "isotonic"):
+        bundle_path = stage_root / f"{method}.joblib"
+        diagnostics_path = stage_root / f"{method}.json"
+        if bundle_path.exists():
+            saved = joblib.load(bundle_path)
+            if saved.get("identity") != stage_identity or saved.get("method") != method:
+                raise RuntimeError(f"Saved HGNN {method} calibration stage has a different identity")
+            bundle = saved["bundle"]
+        else:
+            bundle = fit_calibration_candidate(
+                method,
+                calibration["targets"],
+                calibration["logits"],
+                calibration["probabilities"],
+                minimum_support=minimum_support,
+            )
+            atomic_joblib(bundle_path, {"identity": stage_identity, "method": method, "bundle": bundle})
+        if diagnostics_path.exists():
+            saved_diagnostics = json.loads(diagnostics_path.read_text(encoding="utf-8"))
+            if saved_diagnostics.get("identity") != stage_identity:
+                raise RuntimeError(f"Saved HGNN {method} calibration diagnostics have a different identity")
+            calibration_results[method] = saved_diagnostics["diagnostics"]
+        else:
+            values = apply_calibration(bundle, logits, raw)
+            calibration_results[method] = calibration_diagnostics(y, values)
+            atomic_json(diagnostics_path, {"identity": stage_identity, "method": method, "diagnostics": calibration_results[method]})
+        atomic_json(work_root / "audit_progress.json", {
+            "version": AUDIT_VERSION,
+            "updatedAt": utc_now(),
+            "completedCalibrationMethods": list(calibration_results),
+            "holdoutAccessed": False,
+        })
     calibration_choice = choose_calibration(calibration_results)
-    chosen_probabilities = calibrated_by_method[calibration_choice["method"]]
+    chosen_saved = joblib.load(stage_root / f"{calibration_choice['method']}.joblib")
+    chosen_bundle = chosen_saved["bundle"]
+    chosen_probabilities = apply_calibration(chosen_bundle, logits, raw)
 
     folds = deterministic_group_folds(operating["caseids"], folds=5)
     candidates, threshold_details = _configuration_candidates(
         y, raw, chosen_probabilities, vocabulary, folds, minimum_support, calibration_choice,
     )
     selected, constraints = select_configuration(candidates)
-    selected_probabilities = calibrated_by_method[selected["calibration"]]
+    selected_probabilities = raw if selected["calibration"] == "identity" else chosen_probabilities
     selected_thresholds = selected["thresholds"]
-    selected_bundle = calibrators[selected["calibration"]]
+    selected_bundle = (
+        joblib.load(stage_root / "identity.joblib")["bundle"]
+        if selected["calibration"] == "identity"
+        else chosen_bundle
+    )
 
     calibrator_path = work_root / "frozen_calibrator.joblib"
     atomic_joblib(calibrator_path, selected_bundle)
