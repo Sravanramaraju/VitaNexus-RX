@@ -1,100 +1,183 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 from pathlib import Path
 import warnings
 
 import joblib
 import numpy as np
-import pandas as pd
-import torch
 
-from vitanexus_ml.config import ARTIFACT_ROOT, HGNN_VERSION, NO_SERIOUS, SERIOUS
+from vitanexus_ml.config import ARTIFACT_ROOT, REPORT_ROOT
 from vitanexus_ml.conformal.split import prediction_set
-from vitanexus_ml.models.hgnn import HeterogeneousAdrNetwork, _predict_in_batches
 from vitanexus_ml.models.metrics import bootstrap_interval
 from vitanexus_ml.normalization import normalize_drug, normalize_indication
 
 
 class ArtifactsUnavailable(RuntimeError):
-    pass
+    """Raised when the full LightGBM runtime bundle cannot be used safely."""
 
 
 def _lightgbm_probability(model, matrix) -> float:
     with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", message="X does not have valid feature names, but LGBMClassifier was fitted with feature names")
+        warnings.filterwarnings(
+            "ignore",
+            message="X does not have valid feature names, but LGBMClassifier was fitted with feature names",
+        )
         return float(model.predict_proba(matrix)[0, 1])
 
 
-class Predictor:
-    def __init__(self, artifact_root: Path = ARTIFACT_ROOT):
-        serious_path = artifact_root / "serious_outcome.joblib"
-        metadata_path = artifact_root / "hgnn_metadata.joblib"
-        state_path = artifact_root / "hgnn_state.pt"
-        missing = [str(path) for path in (serious_path, metadata_path, state_path) if not path.exists()]
-        if missing:
-            raise ArtifactsUnavailable(f"Required trained artifacts are missing: {', '.join(missing)}")
+def _read_json(path: Path) -> dict | None:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ArtifactsUnavailable(f"Could not read required runtime metadata: {path.name}") from error
+
+
+def _full_manifest(path: Path) -> dict:
+    manifest = _read_json(path)
+    if not manifest:
+        raise ArtifactsUnavailable("Full LightGBM training manifest is missing.")
+    if manifest.get("fastMode") is not False or manifest.get("fullFinalData") is not True:
+        raise ArtifactsUnavailable("Runtime rejects smoke or partial LightGBM artifacts.")
+    if int(manifest.get("config", {}).get("bootstrap_replicas", 0)) != 20:
+        raise ArtifactsUnavailable("Runtime requires exactly 20 configured LightGBM bootstrap replicas.")
+    return manifest
+
+
+def _operating_threshold(report_root: Path, fallback: float) -> tuple[float, str]:
+    """Load the frozen 2025Q4-selected threshold when the audited report exists."""
+    report = _read_json(report_root / "lightgbm_operating_threshold.json")
+    selected = report and report.get("lockedHoldout2026", {}).get("frozenSelectedThreshold", {})
+    threshold = selected.get("threshold") if isinstance(selected, dict) else None
+    if isinstance(threshold, (float, int)) and 0.0 <= float(threshold) <= 1.0:
+        return float(threshold), "frozen_2025Q4_operating_threshold"
+    return float(fallback), "training_artifact_threshold"
+
+
+def _conformal_interpretation(labels: list[str]) -> tuple[str, str]:
+    if not labels:
+        return "UNAVAILABLE", "The conformal prediction set was empty; clinician review is required."
+    if len(labels) == 2:
+        return "AMBIGUOUS", "Both outcome classes remain plausible at the configured conformal coverage."
+    if labels[0] == "SERIOUS_OUTCOME":
+        return "FOCUSED_SERIOUS_OUTCOME", "The prediction set is focused on the serious-outcome class."
+    return "FOCUSED_NO_DOCUMENTED_SERIOUS_OUTCOME", "The prediction set is focused on the no-documented-serious-outcome class."
+
+
+class LightGBMPredictor:
+    """Cached, full-artifact-only inference for overall FAERS adverse risk.
+
+    HGNN is intentionally absent: it remains a future, supplementary,
+    event-level model and must not gate or alter overall-risk inference.
+    """
+
+    def __init__(self, artifact_root: Path = ARTIFACT_ROOT, report_root: Path = REPORT_ROOT):
+        self.artifact_root = Path(artifact_root)
+        self.manifest = _full_manifest(self.artifact_root / "training_manifest.json")
+        serious_path = self.artifact_root / "serious_outcome.joblib"
+        if not serious_path.exists():
+            raise ArtifactsUnavailable("Full LightGBM model artifact is missing.")
         self.serious = joblib.load(serious_path)
-        self.bootstrap = [joblib.load(path) for path in sorted((artifact_root / "bootstrap").glob("replica_*.joblib"))]
-        if not self.bootstrap:
-            raise ArtifactsUnavailable("No bootstrap replica artifacts were found")
-        self.hgnn_metadata = joblib.load(metadata_path)
-        self.hgnn = HeterogeneousAdrNetwork(self.hgnn_metadata["hiddenChannels"], len(self.hgnn_metadata["vocabulary"]))
-        example = self._hgnn_frame({"patient": {"age": None, "sex": "UNKNOWN", "currentMedications": []}, "candidateDrug": {"canonicalName": "UNKNOWN"}, "indication": {"name": "UNKNOWN"}})
-        graph_probabilities = _predict_in_batches(self.hgnn, example, self.hgnn_metadata["vocabulary"], self.hgnn_metadata["associations"], 1)
-        del graph_probabilities
-        self.hgnn.load_state_dict(torch.load(state_path, map_location="cpu", weights_only=True))
-        self.hgnn.eval()
+        if self.serious.get("fastMode") is not False:
+            raise ArtifactsUnavailable("Runtime rejects a smoke-mode LightGBM model artifact.")
+        replica_paths = sorted((self.artifact_root / "bootstrap").glob("replica_*.joblib"))
+        expected_names = [f"replica_{index:02d}.joblib" for index in range(20)]
+        if len(replica_paths) != 20 or [path.name for path in replica_paths] != expected_names:
+            raise ArtifactsUnavailable("Runtime requires 20 contiguous LightGBM bootstrap replicas.")
+        self.bootstrap = [joblib.load(path) for path in replica_paths]
+        self._validate_feature_schema()
+        self.threshold, self.threshold_source = _operating_threshold(report_root, self.serious["threshold"])
+
+    def _validate_feature_schema(self) -> None:
+        builder = self.serious.get("featureBuilder")
+        model = self.serious.get("model")
+        if builder is None or model is None or not hasattr(builder, "feature_names"):
+            raise ArtifactsUnavailable("LightGBM feature-builder artifact is incomplete.")
+        expected = len(builder.feature_names)
+        model_features = int(getattr(model, "n_features_in_", 0))
+        if not expected or expected != model_features:
+            raise ArtifactsUnavailable("LightGBM artifact feature schema does not match model feature ordering.")
 
     def predict(self, request: dict) -> dict:
         candidate = normalize_drug(request["candidateDrug"]["canonicalName"])
         indication = normalize_indication(request["indication"]["name"])
         current = [normalize_drug(value) for value in request["patient"].get("currentMedications", [])]
         matrix, coverage = self.serious["featureBuilder"].transform_one({
-            "age": request["patient"].get("age"), "sex": request["patient"].get("sex"),
-            "candidateDrug": candidate, "indication": indication, "currentMedications": current,
+            "age": request["patient"].get("age"),
+            "sex": request["patient"].get("sex"),
+            "candidateDrug": candidate,
+            "indication": indication,
+            "currentMedications": current,
         })
-        raw = _lightgbm_probability(self.serious["model"], matrix)
-        point = float(self.serious["calibrator"].predict([raw])[0])
-        replica_probabilities = [float(item["calibrator"].predict([_lightgbm_probability(item["model"], matrix)])[0]) for item in self.bootstrap]
+        if int(matrix.shape[1]) != len(self.serious["featureBuilder"].feature_names):
+            raise ArtifactsUnavailable("Generated LightGBM feature schema does not match the persisted schema.")
+        raw_probability = _lightgbm_probability(self.serious["model"], matrix)
+        probability = float(self.serious["calibrator"].predict([raw_probability])[0])
+        replica_probabilities = [
+            float(replica["calibrator"].predict([_lightgbm_probability(replica["model"], matrix)])[0])
+            for replica in self.bootstrap
+        ]
         lower, upper = bootstrap_interval(np.asarray(replica_probabilities))
-        conformal_set = prediction_set(point, float(self.serious["qHat"]))
-        hgnn_raw = _predict_in_batches(self.hgnn, self._hgnn_frame(request), self.hgnn_metadata["vocabulary"], self.hgnn_metadata["associations"], 1)[0]
-        hgnn_scores = np.asarray([
-            calibrator.predict([hgnn_raw[index]])[0] if calibrator else hgnn_raw[index]
-            for index, calibrator in enumerate(self.hgnn_metadata["calibrators"])
-        ])
-        top_indices = np.argsort(-hgnn_scores)[:10]
-        specific = [{"term": self.hgnn_metadata["vocabulary"][index]["term"].title(), "score": float(hgnn_scores[index])} for index in top_indices]
-        smoke_artifact = bool(self.serious.get("fastMode") or self.hgnn_metadata.get("fastMode"))
-        status = "ok" if coverage.candidateKnown and coverage.indicationKnown and not coverage.unknownCurrentMedications and not smoke_artifact else "DEGRADED_COVERAGE"
-        return {
-            "status": status,
-            "artifactMode": "FAST_SMOKE" if smoke_artifact else "FULL",
-            "versions": {**self.serious["versions"], "hgnn": self.hgnn_metadata.get("version", HGNN_VERSION)},
-            "overall": {
-                "task": "serious-outcome classification among FAERS adverse-event reports",
-                "calibratedProbability": point,
-                "uncertainty": {"method": "bootstrap", "level": 0.90, "lower": lower, "upper": upper, "replicas": len(self.bootstrap)},
-                "conservativeUpperBound": upper,
-                "conformal": {"method": "split_conformal", "targetCoverage": 0.90, "qHat": float(self.serious["qHat"]), "predictionSet": conformal_set, "setSize": len(conformal_set), "calibrationVersion": self.serious["versions"]["conformal"]},
+        labels = prediction_set(probability, float(self.serious["qHat"]))
+        reliability, interpretation = _conformal_interpretation(labels)
+        versions = self.serious["versions"]
+        overall = {
+            "task": "serious-outcome classification among FAERS adverse-event reports",
+            "riskProbability": probability,
+            "riskPercent": round(probability * 100, 2),
+            "classification": "ELEVATED" if probability >= self.threshold else "LOWER",
+            "threshold": self.threshold,
+            "thresholdSource": self.threshold_source,
+            "uncertainty": {
+                "method": "bootstrap_model_variability",
+                "level": 0.90,
+                "lower": lower,
+                "upper": upper,
+                "replicas": len(self.bootstrap),
             },
-            "specificAdrs": specific,
+            "adjustedRisk": upper,
+            "conformal": {
+                "method": "split_conformal_classification",
+                "targetCoverage": 0.90,
+                "qHat": float(self.serious["qHat"]),
+                "predictionSet": labels,
+                "setSize": len(labels),
+                "reliability": reliability,
+                "interpretation": interpretation,
+                "calibrationVersion": versions["conformal"],
+                "interval": None,
+                "intervalNote": "Split-conformal classification produces a prediction set, not a probability confidence interval.",
+            },
+        }
+        return {
+            "status": "ok" if coverage.candidateKnown and coverage.indicationKnown and not coverage.unknownCurrentMedications else "DEGRADED_COVERAGE",
+            "artifactMode": "FULL",
+            "model": "LightGBM",
+            "modelVersion": versions["lightgbm"],
+            "versions": {
+                "preprocessing": versions["preprocessing"],
+                "features": versions["features"],
+                "lightgbm": versions["lightgbm"],
+                "bootstrap": versions["bootstrap"],
+                "conformal": versions["conformal"],
+            },
+            "overall": overall,
             "inputCoverage": coverage.__dict__,
             "dataWindow": self.serious["dataWindow"],
             "generatedAt": datetime.now(timezone.utc).isoformat(),
             "clinicalInterpretation": {
                 "population": "FAERS adverse-event reporting context",
-                "limitations": ["FAERS is a spontaneous-reporting system and has reporting bias.", "The probability is not exposed-population incidence.", "Specific ADR scores are model scores, not population incidence."],
+                "limitations": [
+                    "FAERS is a spontaneous-reporting system and has reporting bias.",
+                    "The risk probability is not exposed-population incidence.",
+                    "Conformal output expresses classification-set reliability, not a conventional probability confidence interval.",
+                ],
             },
         }
 
-    @staticmethod
-    def _hgnn_frame(request: dict) -> pd.DataFrame:
-        patient = request["patient"]
-        return pd.DataFrame([{
-            "age_years": patient.get("age"), "sex": patient.get("sex"),
-            "candidate_drug": request["candidateDrug"]["canonicalName"],
-            "indication": request["indication"]["name"],
-            "current_medications": patient.get("currentMedications", []), "reactions": [],
-        }])
+
+# Retained as a stable import for the FastAPI app and downstream consumers.
+Predictor = LightGBMPredictor
