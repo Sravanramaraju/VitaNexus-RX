@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import json
 import os
 from pathlib import Path
@@ -12,7 +13,7 @@ import torch
 from vitanexus_ml.config import HGNN_TRAINING_PIPELINE_VERSION, HGNN_VERSION
 from vitanexus_ml.models.hgnn import HeterogeneousAdrNetwork, build_heterodata
 from vitanexus_ml.models.hgnn_colab_pipeline import HgnnTrainConfig, ROW_COLUMNS, _iter_frames
-from vitanexus_ml.training_runtime import atomic_json, file_sha256, stable_hash, utc_now
+from vitanexus_ml.training_runtime import atomic_json, atomic_replace, file_sha256, stable_hash, utc_now
 
 
 HGNN_POST_TRAINING_VERSION = "faers-hgnn-post-training-1.0.0"
@@ -255,8 +256,10 @@ def _cache_frozen_predictions(
         "targetEdgesExcludedFromEncoder": True,
     }
     atomic_json(temporary / "metadata.json", metadata)
+    del caseids, targets, logits, probabilities
+    gc.collect()
     paths["root"].parent.mkdir(parents=True, exist_ok=True)
-    temporary.replace(paths["root"])
+    atomic_replace(temporary, paths["root"])
     verify_checkpoint_integrity(integrity_manifest_path)
     return metadata
 
