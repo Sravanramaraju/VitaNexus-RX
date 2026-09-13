@@ -2,7 +2,7 @@ import { ddinterSearchTerms, highestDdiSeverity, highestDiseaseAssessment } from
 import { adrPredictionProvider } from "./adrPredictionProvider.js";
 import { rankRecommendations, recommendationRankingConfig } from "./recommendationRankingService.js";
 
-const ENGINE_VERSION = "vitanexus-knowledge-2.2.0";
+const ENGINE_VERSION = "vitanexus-knowledge-2.3.0";
 const overallAssessment = (ddiSeverity, diseaseAssessment) => {
   if (ddiSeverity === "MAJOR" || diseaseAssessment === "HIGH") return "HIGH";
   if (ddiSeverity === "MODERATE" || diseaseAssessment === "MODERATE") return "MODERATE";
@@ -72,10 +72,6 @@ export const clinicalSafetyAssessment = async ({ consultation, patient, knowledg
       assessment: overallAssessment(ddiSeverity, diseaseAssessment),
       dataStatus: interactionFindings.length || diseaseFindings.length ? "DATASET_MATCHED" : "NO_DATASET_MATCH",
       explanation: "An ordinal synthesis of DDInter severity and DrugCentral drug-disease assessment; it is not a probability or percentage.",
-    },
-    conformalReliability: {
-      status: "NOT_IMPLEMENTED",
-      explanation: "No calibrated confidence, prediction interval, or conformal reliability measure is produced by this clinical-safety workflow.",
     },
   };
 };
