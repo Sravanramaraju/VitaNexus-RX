@@ -14,9 +14,8 @@ const knowledgeRepository = {
 const provider = {
   predictBatch: async (inputs) => inputs.map(() => ({
     status: "ok",
-    overall: { calibratedProbability: 0.2, uncertainty: { lower: 0.1, upper: 0.3 }, conservativeUpperBound: 0.3, conformal: { predictionSet: ["NO_DOCUMENTED_SERIOUS_OUTCOME"] } },
-    specificAdrs: [],
-    versions: { lightgbm: "test", bootstrap: "test", conformal: "test", hgnn: "test", preprocessing: "test" },
+    overall: { adjustedRisk: 0.3, conformal: { predictionSet: ["NO_DOCUMENTED_SERIOUS_OUTCOME"] } },
+    versions: { lightgbm: "test", bootstrap: "test", conformal: "test", preprocessing: "test" },
   })),
 };
 
@@ -68,10 +67,10 @@ describe("dataset-backed clinical service contracts", () => {
     expect(await recommendations({ consultation, patient: { ...patient, allergies: [{ display: "Penicillin", severity: "severe" }] }, knowledgeRepository, requestId: "test", provider })).toEqual(await recommendations({ consultation, patient, knowledgeRepository, requestId: "test", provider }));
   });
 
-  it("returns DrugCentral indication candidates without a synthetic safety score", async () => {
+  it("returns same-indication candidates with an explicit safety-aware score", async () => {
     const result = await recommendations({ consultation, patient, knowledgeRepository, requestId: "test", provider });
-    expect(result).toEqual([expect.objectContaining({ drug: "Paracetamol", source: "DrugCentral", rank: 1 })]);
-    expect(result[0]).not.toHaveProperty("riskPct");
+    expect(result).toEqual([expect.objectContaining({ drug: "Paracetamol", source: "DrugCentral", status: "REQUIRES_REVIEW", rank: null })]);
+    expect(result[0]).not.toHaveProperty("safetyScore");
     expect(recommendationRankingConfig.candidateSource).toContain("DrugCentral");
   });
 

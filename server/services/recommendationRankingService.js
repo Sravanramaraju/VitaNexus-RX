@@ -1,19 +1,16 @@
 import { highestDdiSeverity, highestDiseaseAssessment, normalizeClinicalTerm } from "../repositories/clinicalKnowledgeRepository.js";
 import { adrPredictionProvider, buildAdrPredictionInput } from "./adrPredictionProvider.js";
+import {
+  isSeriousDrugDiseaseRestriction,
+  isSevereDdi,
+  normalizeDdiRisk,
+  normalizeDrugDiseaseRisk,
+  normalizeProbability,
+  rankingConfig,
+} from "./rankingConfig.js";
 
-export const RANKING_ENGINE_VERSION = "vitanexus-lexicographic-p1-p2-p3-1.0.0";
-export const recommendationRankingConfig = Object.freeze({
-  configId: RANKING_ENGINE_VERSION,
-  status: "ML_ENHANCED_DATASET_BACKED_EVALUATION",
-  weightsStatus: "NOT_APPLICABLE_LEXICOGRAPHIC",
-  candidateSource: "DrugCentral indication relationships",
-  priorities: [
-    "P1 known DDInter/DrugCentral safety tier and evidence completeness",
-    "P2 lower 90% bootstrap upper bound",
-    "P3 conformal prediction-set preference",
-    "P4 canonical drug name",
-  ],
-});
+export const RANKING_ENGINE_VERSION = rankingConfig.configId;
+export const recommendationRankingConfig = rankingConfig;
 
 export const buildRecommendationInput = ({ consultation, patient, safety, candidates = [], modelVersions = {} }) => ({
   consultationId: consultation.id,
@@ -29,12 +26,12 @@ export const buildRecommendationInput = ({ consultation, patient, safety, candid
     .filter((medicine) => medicine.status === "ACTIVE")
     .map((medicine) => medicine.genericName)
     .sort(),
-  conditions: patient.conditions.map((condition) => ({ display: condition.display, code: condition.code || null })).sort((first, second) => first.display.localeCompare(second.display)),
+  conditions: patient.conditions.map((condition) => ({ display: condition.display, code: condition.code || null }))
+    .sort((first, second) => first.display.localeCompare(second.display)),
   safety: {
     engineVersion: safety.engineVersion || null,
     drugDrug: { severity: safety.drugDrug?.severity || "NOT_EVALUATED", findings: safety.drugDrug?.findings || [] },
     drugDisease: { assessment: safety.drugDisease?.assessment || "NOT_EVALUATED", findings: safety.drugDisease?.findings || [] },
-    overall: safety.overall,
   },
   candidates,
   versions: { ranking: RANKING_ENGINE_VERSION, ...modelVersions },
@@ -42,34 +39,13 @@ export const buildRecommendationInput = ({ consultation, patient, safety, candid
 
 const ddiTier = (severity) => severity === "MAJOR" ? "HIGH" : severity === "MODERATE" ? "MODERATE" : severity === "MINOR" ? "LOW" : "NOT_EVALUATED";
 const diseaseTier = (assessment) => ["LOW", "MODERATE", "HIGH"].includes(assessment) ? assessment : "NOT_EVALUATED";
-const tierOrder = { LOW: 0, MODERATE: 1, HIGH: 2, NOT_EVALUATED: 3 };
-const conformalOrder = (predictionSet = []) => {
-  const normalized = [...predictionSet].sort().join("|");
-  if (normalized === "NO_DOCUMENTED_SERIOUS_OUTCOME") return 0;
-  if (normalized === "NO_DOCUMENTED_SERIOUS_OUTCOME|SERIOUS_OUTCOME") return 1;
-  if (normalized === "SERIOUS_OUTCOME") return 2;
-  return 3;
-};
-const isMlAvailable = (candidate) => ["ok", "DEGRADED_COVERAGE"].includes(candidate.ml?.status) && Number.isFinite(candidate.ml?.overall?.conservativeUpperBound);
 
-export const compareRecommendations = (first, second) => {
-  const firstTier = tierOrder[first.knownSafetyEvidence.tier] ?? tierOrder.NOT_EVALUATED;
-  const secondTier = tierOrder[second.knownSafetyEvidence.tier] ?? tierOrder.NOT_EVALUATED;
-  if (firstTier !== secondTier) return firstTier - secondTier;
-  if (first.knownSafetyEvidence.complete !== second.knownSafetyEvidence.complete) return first.knownSafetyEvidence.complete ? -1 : 1;
-  const firstMl = isMlAvailable(first);
-  const secondMl = isMlAvailable(second);
-  if (firstMl !== secondMl) return firstMl ? -1 : 1;
-  if (firstMl && secondMl) {
-    const upperDifference = first.ml.overall.conservativeUpperBound - second.ml.overall.conservativeUpperBound;
-    if (Math.abs(upperDifference) > Number.EPSILON) return upperDifference;
-    const conformalDifference = conformalOrder(first.ml.overall.conformal.predictionSet) - conformalOrder(second.ml.overall.conformal.predictionSet);
-    if (conformalDifference) return conformalDifference;
-  }
-  return first.drug.localeCompare(second.drug);
+const candidateSafetyGate = ({ drugDrug, drugDisease }) => {
+  if (isSevereDdi(drugDrug.severity)) return { status: "NOT_RECOMMENDED", reasons: ["Excluded from normal ranking because DDInter reports a major interaction."] };
+  if (isSeriousDrugDiseaseRestriction(drugDisease.assessment)) return { status: "NOT_RECOMMENDED", reasons: ["Excluded from normal ranking because DrugCentral reports a high/serious drug-disease restriction."] };
+  if (!drugDrug.complete || !drugDisease.complete) return { status: "REQUIRES_REVIEW", reasons: ["One or more essential DDInter or DrugCentral evaluations are unavailable; no safety score was inferred."] };
+  return { status: "ELIGIBLE", reasons: [] };
 };
-
-const worstTier = (...tiers) => tiers.reduce((worst, tier) => (tierOrder[tier] > tierOrder[worst] ? tier : worst), "LOW");
 
 const evaluateKnownSafety = async ({ candidate, patient, knowledgeRepository }) => {
   const activeMedicines = patient.medications.filter((medicine) => medicine.status === "ACTIVE");
@@ -86,44 +62,111 @@ const evaluateKnownSafety = async ({ candidate, patient, knowledgeRepository }) 
   const interactionFindings = interactions.filter((item) => item.status === "DATASET_MATCHED");
   const ddiSeverity = highestDdiSeverity(interactionFindings.map((finding) => finding.displaySeverity));
   const ddiComplete = interactions.every((item) => item.status !== "UNRESOLVED");
-  const ddiEvidenceTier = interactionFindings.length ? ddiTier(ddiSeverity) : ddiComplete ? "LOW" : "NOT_EVALUATED";
 
   const diseaseEvaluation = await knowledgeRepository.findDrugDiseaseAssessments(candidate.genericDrug, patient.conditions);
   const diseaseFindings = Array.isArray(diseaseEvaluation) ? diseaseEvaluation : diseaseEvaluation.findings;
   const diseaseResolutions = Array.isArray(diseaseEvaluation) ? [] : diseaseEvaluation.resolutions;
   const diseaseAssessment = highestDiseaseAssessment(diseaseFindings.map((finding) => finding.assessment));
   const diseaseComplete = patient.conditions.length === 0 || (diseaseResolutions.length === patient.conditions.length && diseaseResolutions.every((resolution) => resolution.status === "RESOLVED"));
-  const diseaseEvidenceTier = diseaseFindings.length ? diseaseTier(diseaseAssessment) : diseaseComplete ? "LOW" : "NOT_EVALUATED";
-  const knownTier = worstTier(ddiEvidenceTier, diseaseEvidenceTier);
-  const complete = ddiComplete && diseaseComplete;
+
+  const drugDrug = {
+    severity: ddiSeverity,
+    evidenceTier: interactionFindings.length ? ddiTier(ddiSeverity) : ddiComplete ? "LOW" : "NOT_EVALUATED",
+    complete: ddiComplete,
+    evaluations: interactions,
+    findings: interactionFindings,
+    normalizedRisk: ddiComplete ? (activeMedicines.length ? normalizeDdiRisk(ddiSeverity) ?? 0 : 0) : null,
+  };
+  const drugDisease = {
+    assessment: diseaseAssessment,
+    evidenceTier: diseaseFindings.length ? diseaseTier(diseaseAssessment) : diseaseComplete ? "LOW" : "NOT_EVALUATED",
+    complete: diseaseComplete,
+    findings: diseaseFindings,
+    conditionResolutions: diseaseResolutions,
+    normalizedRisk: diseaseComplete ? (patient.conditions.length ? normalizeDrugDiseaseRisk(diseaseAssessment) ?? 0 : 0) : null,
+  };
+  const gate = candidateSafetyGate({ drugDrug, drugDisease });
   return {
-    drugDrug: { severity: ddiSeverity, evidenceTier: ddiEvidenceTier, complete: ddiComplete, evaluations: interactions, findings: interactionFindings },
-    drugDisease: { assessment: diseaseAssessment, evidenceTier: diseaseEvidenceTier, complete: diseaseComplete, findings: diseaseFindings, conditionResolutions: diseaseResolutions },
+    drugDrug,
+    drugDisease,
     knownSafetyEvidence: {
-      tier: knownTier,
-      complete,
-      label: complete ? "Fully evaluated evidence" : "Requires Clinical Review",
+      complete: ddiComplete && diseaseComplete,
+      label: ddiComplete && diseaseComplete ? "Fully evaluated evidence" : "Requires Clinical Review",
       unresolved: [
         ...interactions.filter((item) => item.status === "UNRESOLVED").map((item) => `DDInter: ${item.existingMedication}`),
         ...diseaseResolutions.filter((item) => item.status !== "RESOLVED").map((item) => `DrugCentral: ${item.enteredCondition}`),
       ],
     },
-    assessment: knownTier,
-    dataStatus: complete ? "FULLY_EVALUATED" : "INCOMPLETE_EVIDENCE",
+    gate,
+    assessment: gate.status,
+    dataStatus: ddiComplete && diseaseComplete ? "FULLY_EVALUATED" : "INCOMPLETE_EVIDENCE",
   };
 };
 
-const rankExplanation = (candidate, allCandidates) => {
-  const preceding = allCandidates.filter((item) => compareRecommendations(item, candidate) < 0)[0];
-  if (!preceding) {
-    if (isMlAvailable(candidate)) return `Ranked first in the ${candidate.knownSafetyEvidence.tier} known-safety tier with complete evidence preferred, then the lowest available conservative serious-outcome upper bound.`;
-    return `Ranked first by known-safety evidence. ML-enhanced ranking was unavailable and no risk value was substituted.`;
+const isMlAvailable = (candidate) => candidate.ml?.status === "ok" && normalizeProbability(candidate.ml?.overall?.adjustedRisk) !== null;
+
+const scoreCandidate = (candidate) => {
+  if (candidate.gate.status !== "ELIGIBLE") {
+    return {
+      ...candidate,
+      status: candidate.gate.status,
+      assessment: candidate.gate.status,
+      reasons: candidate.gate.reasons,
+    };
   }
-  if (tierOrder[candidate.knownSafetyEvidence.tier] > tierOrder[preceding.knownSafetyEvidence.tier]) return `Ranked below ${preceding.drug} because known DDInter/DrugCentral evidence has priority over ML estimates.`;
-  if (!candidate.knownSafetyEvidence.complete) return "Ranked below fully evaluated candidates in the same known-safety tier because material clinical evidence is unresolved.";
-  if (!isMlAvailable(candidate)) return "ML evaluation was unavailable; no zero-risk value was imputed, so fully evaluated ML candidates are preferred within this known-safety tier.";
-  return "Ranked by the lower 90% bootstrap upper bound within the same known-safety tier; conformal output and canonical name resolve exact ties.";
+  if (!isMlAvailable(candidate)) {
+    return {
+      ...candidate,
+      status: "REQUIRES_REVIEW",
+      assessment: "REQUIRES_REVIEW",
+      reasons: [...candidate.gate.reasons, "LightGBM overall-risk evaluation is unavailable or has incomplete input coverage; no ranking score was inferred."],
+    };
+  }
+  const adjustedRisk = normalizeProbability(candidate.ml.overall.adjustedRisk);
+  const ddiRisk = candidate.drugDrug.normalizedRisk;
+  const drugDiseaseRisk = candidate.drugDisease.normalizedRisk;
+  if (adjustedRisk === null || ddiRisk === null || drugDiseaseRisk === null) {
+    return { ...candidate, status: "REQUIRES_REVIEW", assessment: "REQUIRES_REVIEW", reasons: [...candidate.gate.reasons, "An essential ranking dimension is unavailable; no score was inferred."] };
+  }
+  const finalRiskScore = (
+    rankingConfig.weights.adjustedLightgbmRisk * adjustedRisk
+    + rankingConfig.weights.ddiRisk * ddiRisk
+    + rankingConfig.weights.drugDiseaseRisk * drugDiseaseRisk
+  );
+  return {
+    ...candidate,
+    status: "RECOMMENDED",
+    assessment: "RECOMMENDED",
+    finalRiskScore,
+    safetyScore: (1 - finalRiskScore) * 100,
+    components: {
+      lightgbmAdjustedRisk: adjustedRisk,
+      lightgbmWeight: rankingConfig.weights.adjustedLightgbmRisk,
+      ddiRisk,
+      ddiWeight: rankingConfig.weights.ddiRisk,
+      drugDiseaseRisk,
+      drugDiseaseWeight: rankingConfig.weights.drugDiseaseRisk,
+    },
+    reasons: [
+      "Candidate identified from a DrugCentral same-indication relationship.",
+      "Score combines uncertainty-adjusted LightGBM adverse risk, DDInter risk, and DrugCentral drug-disease risk.",
+    ],
+  };
 };
+
+export const compareRecommendations = (first, second) => {
+  const scoreDifference = first.finalRiskScore - second.finalRiskScore;
+  if (Math.abs(scoreDifference) > Number.EPSILON) return scoreDifference;
+  const adjustedDifference = first.components.lightgbmAdjustedRisk - second.components.lightgbmAdjustedRisk;
+  if (Math.abs(adjustedDifference) > Number.EPSILON) return adjustedDifference;
+  const ddiDifference = first.components.ddiRisk - second.components.ddiRisk;
+  if (Math.abs(ddiDifference) > Number.EPSILON) return ddiDifference;
+  const diseaseDifference = first.components.drugDiseaseRisk - second.components.drugDiseaseRisk;
+  if (Math.abs(diseaseDifference) > Number.EPSILON) return diseaseDifference;
+  return first.drug.localeCompare(second.drug);
+};
+
+const rankExplanation = (candidate) => `Safety-aware ranking: ${(candidate.components.lightgbmWeight * 100).toFixed(0)}% uncertainty-adjusted LightGBM risk, ${(candidate.components.ddiWeight * 100).toFixed(0)}% DDInter risk, and ${(candidate.components.drugDiseaseWeight * 100).toFixed(0)}% DrugCentral drug-disease risk. Conformal information modifies the LightGBM interpretation and has no independent weight.`;
 
 export const rankRecommendations = async ({ consultation, patient, knowledgeRepository, requestId, provider = adrPredictionProvider }) => {
   const candidates = await knowledgeRepository.findCandidateDrugs(consultation.indication);
@@ -137,26 +180,20 @@ export const rankRecommendations = async ({ consultation, patient, knowledgeRepo
     datasetVersion: candidate.datasetVersion,
     ...await evaluateKnownSafety({ candidate, patient, knowledgeRepository }),
   })));
-  const mlInputs = knownEvaluations.map((candidate, index) => buildAdrPredictionInput({
-    consultation, patient, requestId: `${requestId}:candidate:${index}`, candidateGeneric: candidate.drug,
-  }));
-  const mlResults = await provider.predictBatch(mlInputs);
-  const evaluated = knownEvaluations.map((candidate, index) => ({ ...candidate, ml: mlResults[index] }));
-  const sorted = [...evaluated].sort(compareRecommendations);
-  return sorted.slice(0, 3).map((candidate, index) => ({
+  const mlEligible = knownEvaluations.filter((candidate) => candidate.gate.status === "ELIGIBLE");
+  const mlResults = await provider.predictBatch(mlEligible.map((candidate, index) => buildAdrPredictionInput({
+    consultation,
+    patient,
+    requestId: `${requestId}:candidate:${index}`,
+    candidateGeneric: candidate.drug,
+  })));
+  const resultByDrug = new Map(mlEligible.map((candidate, index) => [candidate.drug, mlResults[index]]));
+  const assessed = knownEvaluations.map((candidate) => scoreCandidate({ ...candidate, ml: resultByDrug.get(candidate.drug) || null }));
+  const recommended = assessed.filter((candidate) => candidate.status === "RECOMMENDED").sort(compareRecommendations).map((candidate, index) => ({
     ...candidate,
     rank: index + 1,
-    ranking: {
-      p1: candidate.knownSafetyEvidence,
-      p2: isMlAvailable(candidate) ? candidate.ml.overall.conservativeUpperBound : null,
-      p3: isMlAvailable(candidate) ? candidate.ml.overall.conformal.predictionSet : null,
-      engineVersion: RANKING_ENGINE_VERSION,
-      explanation: rankExplanation(candidate, sorted),
-    },
-    reasons: [
-      "Candidate identified from a DrugCentral indication relationship.",
-      "Known DDInter/DrugCentral evidence is evaluated before learned FAERS evidence.",
-      isMlAvailable(candidate) ? "The bootstrap upper bound ranks candidates within the same known-safety tier." : "ML-enhanced ranking unavailable; no low or zero risk was inferred.",
-    ],
+    ranking: { engineVersion: RANKING_ENGINE_VERSION, formula: rankingConfig.formula, explanation: rankExplanation(candidate) },
   }));
+  const flagged = assessed.filter((candidate) => candidate.status !== "RECOMMENDED").sort((first, second) => first.drug.localeCompare(second.drug)).map((candidate) => ({ ...candidate, rank: null }));
+  return [...recommended, ...flagged];
 };
