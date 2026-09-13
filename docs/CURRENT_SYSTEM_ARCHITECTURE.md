@@ -16,8 +16,8 @@ flowchart LR
   API --> KNOWN["DDInter + DrugCentral"]
   API --> ML["PythonAdrModelProvider"]
   ML --> FASTAPI["FastAPI :8000"]
-  FASTAPI --> LGBM["Calibrated LightGBM + bootstrap + conformal"]
-  FASTAPI --> HGNN["PyG heterogeneous ADR model"]
+  FASTAPI --> LGBM["Calibrated LightGBM + bootstrap + conformal classification set"]
+  UI --> HGNN["HGNN event-risk module: validation pending"]
 ```
 
 The Python service loads artifacts once at startup. Express propagates request IDs, uses a bounded timeout, validates responses with Zod, and persists the result JSON. It never converts missing ML into zero/LOW risk.
@@ -45,11 +45,11 @@ Consultation submission requires a selected DrugCentral result:
 
 Express verifies the ID, source, version, and normalized display text against `DrugIndicationKnowledge`. Arbitrary typed text cannot be submitted as the selected indication.
 
-The FAERS runtime vector uses only age, sex, canonical candidate drug, selected indication, and active/current medicines. Conditions remain in the DrugCentral P1 branch and are not fabricated as FAERS comorbidity history. Allergies are stored/displayed but remain outside automated analysis.
+The FAERS runtime vector uses only age, sex, canonical candidate drug, selected indication, and active/current medicines. Conditions are evaluated through DrugCentral evidence and are not fabricated as FAERS comorbidity history. Allergies are stored/displayed clinician-reference information and remain outside automated analysis and ranking.
 
 ## Evidence branches
 
-### Known evidence (P1)
+### Known evidence and safety gates
 
 - DDInter checks every candidate × active medicine pair and retains the worst relationship.
 - DrugCentral checks every candidate × resolvable condition and retains the worst relationship.
@@ -64,9 +64,9 @@ The LightGBM task is:
 
 > Probability that a FAERS adverse-event report for this context belongs to the serious-outcome class.
 
-It is not the probability that an exposed patient experiences any ADR. The point probability is isotonic-calibrated. Twenty bootstrap replicas are configured in full mode and produce a 90% model-uncertainty interval; the upper bound is P2. Split conformal uses 2025Q4 and target coverage 0.90; its prediction set is P3 on exact P1/P2 ties.
+It is not the probability that an exposed patient experiences any ADR. The point probability is isotonic-calibrated. Twenty bootstrap replicas are configured in full mode and produce a model-uncertainty range; the conservative upper bootstrap bound is the uncertainty-adjusted LightGBM risk used in ranking. Split conformal uses 2025Q4 and target coverage 0.90. Its output is a classification prediction set, not a probability-confidence interval and not an independent ranking weight.
 
-The HGNN predicts specific MedDRA PT associations. Its report→ADR targets never enter encoder edges. HGNN output is explanatory only and is not another ranking weight.
+HGNN-specific MedDRA PT scoring is not part of the active backend model path. The event-risk UI route explicitly reports that validation is pending; it does not load an HGNN artefact, fabricate an event score, affect conformal output, or affect ranking.
 
 ### Laptop-safe training architecture
 
@@ -74,15 +74,14 @@ The full LightGBM training path is benchmark-gated and resumable. SHA-256 identi
 
 Bootstrap resampling remains at CASEID level but is represented by deterministic multiplicity/sample-weight vectors; feature rows are never duplicated. Every tuning model, baseline, final model, calibration object, and bootstrap replica is atomically checkpointed under local AppData by default, avoiding OneDrive locks and sync overhead. Partial full artifacts remain isolated from runtime smoke artifacts until all stages finish. `npm run ml:benchmark` reports measured RAM/timing and projected full cost; `npm run ml:status` reports resumable stage and replica completion.
 
-### Deterministic ranking
+### Safety-aware deterministic ranking
 
-The ranking engine is `vitanexus-lexicographic-p1-p2-p3-1.0.0`:
+The ranking engine is `vitanexus-safety-aware-50-30-20-1.0.0`:
 
-1. P1 tier and evidence completeness.
-2. Presence of valid ML (missing output is never zero).
-3. Lower bootstrap upper bound.
-4. Conformal singleton non-serious, ambiguous set, singleton serious, invalid/empty.
-5. Canonical drug name.
+1. A MAJOR/contraindicated DDI or HIGH/serious drug--disease restriction is flagged `NOT_RECOMMENDED` before scoring.
+2. Missing known-evidence or ML evidence is `REQUIRES_REVIEW`; it is never treated as zero risk.
+3. Eligible candidates use `0.50 * adjustedLightGBMRisk + 0.30 * ddiRisk + 0.20 * drugDiseaseRisk`.
+4. Lower final risk is safer; deterministic component and canonical-name ties make ordering reproducible.
 
 Rule-based “Why this rank?” text is stored with each candidate. No LLM or random score participates.
 
@@ -101,7 +100,7 @@ Express:
 - legacy-compatible `GET .../adr-prediction`
 - `POST/GET /api/v1/consultations/:id/recommendations`
 
-The ADR page implements LOADING, SUCCESS, DEGRADED, UNAVAILABLE, and FAILED states. It displays calibrated probability, interval, conservative upper bound, conformal set, top ADRs, feature coverage, versions, data window, and FAERS limitations.
+The ADR page implements LOADING, SUCCESS, DEGRADED, UNAVAILABLE, and FAILED states. It displays calibrated probability, bootstrap range, conservative upper bound, conformal classification set, feature coverage, versions, data window, and FAERS limitations. The separate event-risk route transparently shows HGNN validation as pending.
 
 ## Persistence/version invalidation
 
@@ -119,4 +118,4 @@ The ADR page implements LOADING, SUCCESS, DEGRADED, UNAVAILABLE, and FAILED stat
 
 ## Scientific limitations
 
-FAERS is a spontaneous-reporting system with reporting and selection bias and no exposed-population denominator. Serious-outcome estimates are conditional on the learned reporting task. Specific ADR scores are not incidence or severity. No documented interaction is not proof of safety. Allergy automation and online feedback retraining are outside current scope.
+FAERS is a spontaneous-reporting system with reporting and selection bias and no exposed-population denominator. Serious-outcome estimates are conditional on the learned reporting task. No documented interaction is not proof of safety. Allergy automation, HGNN event-risk deployment, and online feedback retraining are outside current scope.

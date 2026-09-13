@@ -7,8 +7,8 @@ VitaNexus-RX is a B.Tech CSE clinical decision-support project that combines Ind
 1. Select an Indian brand/generic medicine and a required DrugCentral-backed indication.
 2. Evaluate the candidate against active medicines (DDInter) and resolved conditions (DrugCentral).
 3. Open the dedicated Adverse Risk Assessment page.
-4. Obtain a calibrated LightGBM serious-outcome estimate, 90% bootstrap model-uncertainty interval, split-conformal set, and HGNN-specific ADR scores.
-5. Rank same-indication alternatives lexicographically: P1 known safety evidence, P2 lower bootstrap upper bound, P3 conformal set, P4 canonical name.
+4. Obtain a calibrated LightGBM serious-outcome estimate, a bootstrap uncertainty range, and a split-conformal classification prediction set.
+5. Apply safety gates first, then rank eligible same-indication alternatives using 50% uncertainty-adjusted LightGBM risk, 30% DDI risk, and 20% drug--disease risk. Lower risk is safer.
 6. Persist notes, analyses, recommendations, and follow-up in PostgreSQL.
 
 FAERS probabilities are conditional on the learned adverse-event reporting task. They are not population incidence.
@@ -58,6 +58,8 @@ npm run ml:train:hgnn -- --fast
 Never report fast-mode metrics as final research results.
 
 The full LightGBM command refuses to start without a benchmark matching the immutable processed cohort and current configuration. Full training is checkpointed and resumes completed stages/replicas. It never silently switches to `--fast` or reduces the final 2022Q1–2025Q2 fit. See [ML_TRAINING_OPERATIONS.md](docs/ML_TRAINING_OPERATIONS.md) and the exact [Google Colab migration guide](docs/COLAB_ML_TRAINING.md).
+
+The current production risk path is deliberately LightGBM-only. HGNN-specific adverse-event scoring remains an unavailable, clearly labelled future module; it is not loaded, used for conformal prediction, or used in alternative ranking.
 
 ## Environment
 
