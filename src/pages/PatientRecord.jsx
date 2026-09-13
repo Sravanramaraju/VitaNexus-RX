@@ -93,8 +93,8 @@ const componentEvidenceLabel = (value, complete, noMatchLabel) => value === "NOT
 function RecommendationMlDetails({ recommendation }) {
   const ml = recommendation.ml;
   const available = ["ok", "DEGRADED_COVERAGE"].includes(ml?.status) && ml?.overall;
-  if (!available) return <div className="mt-3 rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs"><strong>ML-enhanced ranking unavailable.</strong> No zero or LOW risk was substituted. Known safety evidence remains the ranking basis.</div>;
-  return <div className="mt-3 border-t border-border pt-3 dark:border-slate-600">{ml.status === "DEGRADED_COVERAGE" && <div className="mb-3 rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs"><strong>{ml.artifactMode === "FAST_SMOKE" ? "Development smoke model:" : "Degraded ML coverage:"}</strong> {ml.artifactMode === "FAST_SMOKE" ? "pipeline-verification estimates only; not final model results." : "some inputs were outside the trained vocabulary."}</div>}<div className="grid grid-cols-2 gap-x-5 gap-y-4"><Metric label="Calibrated serious-outcome estimate">{probability(ml.overall.calibratedProbability)}</Metric><Metric label="90% bootstrap interval">{probability(ml.overall.uncertainty.lower)} – {probability(ml.overall.uncertainty.upper)}</Metric><Metric label="Conservative upper bound">{probability(ml.overall.conservativeUpperBound)}</Metric><Metric label="Conformal prediction set">&#123;{ml.overall.conformal.predictionSet.join(", ")}&#125;</Metric></div>{ml.specificAdrs?.length > 0 && <p className="mt-3 text-xs"><strong>Top predicted ADRs:</strong> {ml.specificAdrs.slice(0, 3).map((item) => `${item.term} ${probability(item.score)}`).join(" · ")}</p>}<p className="mt-3 text-xs text-slate-500">{recommendation.ranking?.explanation}</p></div>;
+  if (!available) return <div className="mt-3 rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs"><strong>LightGBM ranking input unavailable.</strong> No zero-risk value was substituted; this candidate requires clinical review.</div>;
+  return <div className="mt-3 border-t border-border pt-3 dark:border-slate-600">{ml.status === "DEGRADED_COVERAGE" && <div className="mb-3 rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs"><strong>Degraded ML coverage:</strong> Some inputs were outside the trained vocabulary, so the candidate is not automatically scored.</div>}<div className="grid grid-cols-2 gap-x-5 gap-y-4"><Metric label="Overall adverse risk">{probability(ml.overall.riskProbability)}</Metric><Metric label="90% bootstrap range">{probability(ml.overall.uncertainty.lower)} – {probability(ml.overall.uncertainty.upper)}</Metric><Metric label="Adjusted adverse risk">{probability(ml.overall.adjustedRisk)}</Metric><Metric label="Conformal reliability">{ml.overall.conformal.reliability?.replaceAll("_", " ")}</Metric></div><p className="mt-3 text-xs text-slate-500">{recommendation.ranking?.explanation}</p></div>;
 }
 
 function SideEffectField({ value, onChange }) {
@@ -222,7 +222,7 @@ function Results({
                 key={`${recommendation.drug}-${index}`}
               >
                 <strong>
-                  {index + 1}. {recommendation.drug}
+                  {recommendation.rank ? `${recommendation.rank}. ` : "Flagged · "}{recommendation.drug}
                 </strong>
                 <div className="mt-3 grid grid-cols-2 gap-x-5 gap-y-4">
                   <Metric label="Assessment"><AssessmentBadge severity={datasetResultLabel(recommendation.assessment, recommendation.dataStatus)} /></Metric>
@@ -230,9 +230,10 @@ function Results({
                   <Metric label="Indication relationship" className="col-span-2">{recommendation.indicationRelationship || "Candidate lookup pending"}</Metric>
                   <Metric label="DDInter check"><AssessmentBadge severity={componentEvidenceLabel(recommendation.drugDrug?.severity, recommendation.drugDrug?.complete, "NO INTERACTION DETECTED")} /></Metric>
                   <Metric label="DrugCentral condition check"><AssessmentBadge severity={componentEvidenceLabel(recommendation.drugDisease?.assessment, recommendation.drugDisease?.complete, "NO DOCUMENTED RELATIONSHIP")} /></Metric>
-                  <Metric label="Known Safety Evidence"><AssessmentBadge severity={recommendation.knownSafetyEvidence?.tier || recommendation.assessment} /></Metric>
+                  <Metric label="Safety gate"><AssessmentBadge severity={recommendation.status || recommendation.assessment} /></Metric>
                   <Metric label="Evidence completeness">{recommendation.knownSafetyEvidence?.label || "Requires Clinical Review"}</Metric>
                 </div>
+                {recommendation.status === "RECOMMENDED" && <div className="mt-3 grid grid-cols-2 gap-x-5 gap-y-4 rounded-lg bg-primary/5 p-3"><Metric label="Final safety-aware score">{Number(recommendation.safetyScore).toFixed(1)} / 100</Metric><Metric label="Final risk score">{probability(recommendation.finalRiskScore)}</Metric><Metric label="Adjusted adverse-risk weight">{Math.round(recommendation.components.lightgbmWeight * 100)}%</Metric><Metric label="DDI / drug-disease weights">{Math.round(recommendation.components.ddiWeight * 100)}% / {Math.round(recommendation.components.drugDiseaseWeight * 100)}%</Metric></div>}
                 <RecommendationMlDetails recommendation={recommendation} />
               </div>
             );
@@ -548,7 +549,7 @@ function UpdatedRecommendations({ visit, historical, onBack }) {
                   key={`${recommendation.drug}-${index}`}
                 >
                   <strong>
-                    {index + 1}. {recommendation.drug}
+                    {recommendation.rank ? `${recommendation.rank}. ` : "Flagged · "}{recommendation.drug}
                   </strong>
                   <div className="mt-3 grid grid-cols-2 gap-x-5 gap-y-4">
                     <Metric label="Assessment">
@@ -556,9 +557,10 @@ function UpdatedRecommendations({ visit, historical, onBack }) {
                     </Metric>
                     <Metric label="Source">{recommendation.source || "DrugCentral"}</Metric>
                     <Metric label="Indication relationship" className="col-span-2">{recommendation.indicationRelationship || "Candidate lookup pending"}</Metric>
-                    <Metric label="Known Safety Evidence"><AssessmentBadge severity={recommendation.knownSafetyEvidence?.tier || recommendation.assessment} /></Metric>
+                    <Metric label="Safety gate"><AssessmentBadge severity={recommendation.status || recommendation.assessment} /></Metric>
                     <Metric label="Evidence completeness">{recommendation.knownSafetyEvidence?.label || "Requires Clinical Review"}</Metric>
                   </div>
+                  {recommendation.status === "RECOMMENDED" && <div className="mt-3 grid grid-cols-2 gap-x-5 gap-y-4 rounded-lg bg-primary/5 p-3"><Metric label="Final safety-aware score">{Number(recommendation.safetyScore).toFixed(1)} / 100</Metric><Metric label="Final risk score">{probability(recommendation.finalRiskScore)}</Metric><Metric label="Adjusted adverse-risk weight">{Math.round(recommendation.components.lightgbmWeight * 100)}%</Metric><Metric label="DDI / drug-disease weights">{Math.round(recommendation.components.ddiWeight * 100)}% / {Math.round(recommendation.components.drugDiseaseWeight * 100)}%</Metric></div>}
                   <RecommendationMlDetails recommendation={recommendation} />
                 </div>
               );
