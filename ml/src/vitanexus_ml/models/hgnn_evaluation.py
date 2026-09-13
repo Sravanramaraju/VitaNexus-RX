@@ -68,6 +68,8 @@ def multilabel_metrics(targets, probabilities, thresholds=0.5) -> dict:
     false_positive = int(np.logical_and(predictions, y == 0).sum())
     false_negative = int(np.logical_and(~predictions, y == 1).sum())
     true_negative = int(np.logical_and(~predictions, y == 0).sum())
+    labels_per_case = y.sum(axis=1)
+    positive_cases = labels_per_case > 0
     return {
         "microAUPRC": float(average_precision_score(y, p, average="micro")),
         "macroAUPRC": float(average_precision_score(y[:, valid_ap], p[:, valid_ap], average="macro")),
@@ -82,6 +84,7 @@ def multilabel_metrics(targets, probabilities, thresholds=0.5) -> dict:
         "macroRecall": float(recall_score(y, predictions, average="macro", zero_division=0)),
         "hammingLoss": float(hamming_loss(y, predictions)),
         "averageActualLabelsPerCase": float(y.sum(axis=1).mean()),
+        "averageActualLabelsPerPositiveCase": float(labels_per_case[positive_cases].mean()) if positive_cases.any() else 0.0,
         "averagePredictedLabelsPerCase": float(predictions.sum(axis=1).mean()),
         "brier": float(np.mean((p - y) ** 2)),
         "ece": expected_calibration_error(y, p),
@@ -291,7 +294,7 @@ def top_k_metrics(targets, probabilities, values=(1, 3, 5)) -> dict:
         indexes = np.argpartition(-p, kth=k - 1, axis=1)[:, :k]
         hits = np.take_along_axis(y, indexes, axis=1).sum(axis=1)
         result[f"precisionAt{k}"] = float((hits / k).mean())
-        result[f"recallAt{k}"] = float(np.divide(hits, actual, out=np.zeros_like(hits, dtype=float), where=actual > 0).mean())
+        result[f"recallAt{k}"] = float((hits[positive_cases] / actual[positive_cases]).mean()) if positive_cases.any() else 0.0
         result[f"hitAt{k}"] = float((hits[positive_cases] > 0).mean()) if positive_cases.any() else 0.0
     average_precisions = []
     for row in np.flatnonzero(positive_cases):
