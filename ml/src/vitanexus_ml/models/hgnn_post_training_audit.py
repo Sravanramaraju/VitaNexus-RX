@@ -250,7 +250,9 @@ def run_preholdout_audit(
             "operating": {"window": list(WINDOWS["operating"]), "rows": len(y), "purpose": "calibrator assessment and threshold selection"},
         },
         "minimumRareLabelSupport": minimum_support,
+        "protectedArtifacts": integrity["model"],
         "baselineOperatingMetrics": operating_baseline,
+        "baselineOperatingTopK": top_k_metrics(y, raw, values=(1, 3, 5)),
         "pooledPrevalenceBaseline": float(np.asarray(y).mean()),
         "calibration": {"diagnostics": calibration_results, "selection": calibration_choice},
         "globalStability": global_threshold_stability(y, selected_probabilities, folds, step=0.001),
@@ -282,6 +284,7 @@ def run_preholdout_audit(
     distributions = score_distributions(y, raw, vocabulary)
     _csv(report_root / "hgnn_post_training_per_label_preholdout.csv", per_label)
     _csv(report_root / "hgnn_post_training_score_distributions.csv", distributions)
+    verify_checkpoint_integrity(integrity_manifest_path)
     atomic_json(report_root / "hgnn_post_training_preholdout.json", report)
     atomic_json(frozen_path, frozen)
     return {"selected": selected, "frozenManifest": str(frozen_path), "report": str(report_root / "hgnn_post_training_preholdout.json")}

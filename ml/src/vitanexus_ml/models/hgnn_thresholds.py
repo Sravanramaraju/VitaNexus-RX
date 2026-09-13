@@ -91,15 +91,33 @@ def stable_per_label_thresholds(
     p = np.asarray(probabilities)
     assignments = np.asarray(fold_assignments)
     fold_values: list[np.ndarray] = []
+    fold_precision: list[np.ndarray] = []
+    fold_recall: list[np.ndarray] = []
+    fold_f1: list[np.ndarray] = []
     for fold in sorted(np.unique(assignments).tolist()):
         train = assignments != fold
+        test = ~train
         values, _ = optimize_per_label_thresholds(
             y[train], p[train], vocabulary,
             global_threshold=global_threshold,
             minimum_support=max(1, int(minimum_support * float(train.mean()))),
         )
         fold_values.append(values)
+        predictions = p[test] >= values[None, :]
+        labels = y[test].astype(bool)
+        tp = np.logical_and(predictions, labels).sum(axis=0)
+        fp = np.logical_and(predictions, ~labels).sum(axis=0)
+        fn = np.logical_and(~predictions, labels).sum(axis=0)
+        precision = np.divide(tp, tp + fp, out=np.zeros_like(tp, dtype=float), where=(tp + fp) > 0)
+        recall = np.divide(tp, tp + fn, out=np.zeros_like(tp, dtype=float), where=(tp + fn) > 0)
+        f1 = np.divide(2 * precision * recall, precision + recall, out=np.zeros_like(precision), where=(precision + recall) > 0)
+        fold_precision.append(precision)
+        fold_recall.append(recall)
+        fold_f1.append(f1)
     matrix = np.vstack(fold_values)
+    precision_matrix = np.vstack(fold_precision)
+    recall_matrix = np.vstack(fold_recall)
+    f1_matrix = np.vstack(fold_f1)
     thresholds = np.full(y.shape[1], float(global_threshold), dtype=np.float64)
     rows = []
     for index, item in enumerate(vocabulary):
@@ -130,6 +148,15 @@ def stable_per_label_thresholds(
             "medianThreshold": float(np.median(values)),
             "standardDeviationThreshold": standard_deviation,
             "rangeThreshold": value_range,
+            "heldOutPrecisionByFold": [float(value) for value in precision_matrix[:, index]],
+            "heldOutRecallByFold": [float(value) for value in recall_matrix[:, index]],
+            "heldOutF1ByFold": [float(value) for value in f1_matrix[:, index]],
+            "meanHeldOutPrecision": float(precision_matrix[:, index].mean()),
+            "standardDeviationHeldOutPrecision": float(precision_matrix[:, index].std()),
+            "meanHeldOutRecall": float(recall_matrix[:, index].mean()),
+            "standardDeviationHeldOutRecall": float(recall_matrix[:, index].std()),
+            "meanHeldOutF1": float(f1_matrix[:, index].mean()),
+            "standardDeviationHeldOutF1": float(f1_matrix[:, index].std()),
             "fallback": fallback,
         })
     return thresholds, rows, {
@@ -144,4 +171,3 @@ def stable_per_label_thresholds(
 def local_threshold_sensitivity(targets, probabilities, threshold: float) -> list[dict]:
     values = sorted(set(max(0.0, min(1.0, threshold + delta)) for delta in (-0.005, -0.001, 0, 0.001, 0.005)))
     return [{"threshold": value, **multilabel_metrics(targets, probabilities, value)} for value in values]
-

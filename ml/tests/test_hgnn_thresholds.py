@@ -37,4 +37,6 @@ def test_rare_labels_fall_back_and_unstable_labels_shrink():
     )
     assert thresholds[1] == .5
     assert rows[1]["fallback"].startswith("global threshold")
+    assert len(rows[0]["heldOutF1ByFold"]) == 3
+    assert rows[0]["standardDeviationHeldOutRecall"] >= 0.0
     assert summary["fallbackLabels"] >= 1
