@@ -72,7 +72,13 @@ def _predictor(request: Request) -> Predictor:
 @app.get("/health")
 def health(request: Request):
     ready = request.app.state.predictor is not None
-    return {"status": "ok" if ready else "ML_UNAVAILABLE", "service": "vitanexus-faers-ml", "artifactsLoaded": ready}
+    return {
+        "status": "ok" if ready else "ML_UNAVAILABLE",
+        "service": "vitanexus-faers-ml",
+        "artifactsLoaded": ready,
+        "activeModel": "LightGBM",
+        "eventRiskModelStatus": "model_not_available",
+    }
 
 
 @app.post("/v1/predict")

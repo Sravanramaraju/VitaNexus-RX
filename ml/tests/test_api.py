@@ -19,6 +19,8 @@ def test_health_never_claims_ready_without_artifacts():
         response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] in {"ok", "ML_UNAVAILABLE"}
+    assert response.json()["activeModel"] == "LightGBM"
+    assert response.json()["eventRiskModelStatus"] == "model_not_available"
 
 
 def test_full_lightgbm_predictor_has_no_hgnn_runtime_output():
