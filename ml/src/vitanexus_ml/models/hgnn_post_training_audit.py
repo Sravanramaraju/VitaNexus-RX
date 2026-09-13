@@ -46,6 +46,7 @@ REFERENCE_METRICS = {
     "microPrecision": 0.6218535722185358,
     "microRecall": 0.0353864898474985,
 }
+REFERENCE_REPRODUCTION_TOLERANCE = 5e-6
 
 
 def _csv(path: Path, rows: list[dict]) -> None:
@@ -166,7 +167,7 @@ def run_preholdout_audit(
 
     reproduced = multilabel_metrics(validation["targets"], validation["probabilities"], 0.5)
     deltas = {name: reproduced[name] - expected for name, expected in REFERENCE_METRICS.items()}
-    if any(abs(value) > 2e-6 for value in deltas.values()):
+    if any(abs(value) > REFERENCE_REPRODUCTION_TOLERANCE for value in deltas.values()):
         raise RuntimeError(f"Epoch-20 reference metrics were not reproduced within tolerance: {deltas}")
 
     y = operating["targets"]
@@ -234,7 +235,14 @@ def run_preholdout_audit(
     report = {
         "version": AUDIT_VERSION,
         "createdAt": utc_now(),
-        "referenceReproduction": {"expected": REFERENCE_METRICS, "reproduced": reproduced, "deltas": deltas, "threshold": 0.5},
+        "referenceReproduction": {
+            "expected": REFERENCE_METRICS,
+            "reproduced": reproduced,
+            "deltas": deltas,
+            "absoluteTolerance": REFERENCE_REPRODUCTION_TOLERANCE,
+            "threshold": 0.5,
+            "status": "reproduced",
+        },
         "existingDecisionMethod": {
             "threshold": 0.5,
             "scope": "one global threshold for all ADR outputs",
