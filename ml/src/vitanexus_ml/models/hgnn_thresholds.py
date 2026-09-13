@@ -7,7 +7,8 @@ import numpy as np
 from vitanexus_ml.models.hgnn_evaluation import (
     global_candidates,
     global_threshold_sweep,
-    multilabel_metrics,
+    multilabel_decision_metrics,
+    probability_metrics,
     optimize_per_label_thresholds,
 )
 
@@ -53,7 +54,7 @@ def global_threshold_stability(
         train = assignments != fold
         test = ~train
         selected = global_candidates(global_threshold_sweep(y[train], p[train], step=step))["G1MaximumMicroF1"]
-        metrics = multilabel_metrics(y[test], p[test], selected["threshold"])
+        metrics = multilabel_decision_metrics(y[test], p[test], selected["threshold"])
         rows.append({"fold": int(fold), "selectedThreshold": selected["threshold"], "heldOut": metrics})
     thresholds = np.asarray([row["selectedThreshold"] for row in rows])
     return {
@@ -170,4 +171,5 @@ def stable_per_label_thresholds(
 
 def local_threshold_sensitivity(targets, probabilities, threshold: float) -> list[dict]:
     values = sorted(set(max(0.0, min(1.0, threshold + delta)) for delta in (-0.005, -0.001, 0, 0.001, 0.005)))
-    return [{"threshold": value, **multilabel_metrics(targets, probabilities, value)} for value in values]
+    quality = probability_metrics(targets, probabilities)
+    return [{"threshold": value, **quality, **multilabel_decision_metrics(targets, probabilities, value)} for value in values]

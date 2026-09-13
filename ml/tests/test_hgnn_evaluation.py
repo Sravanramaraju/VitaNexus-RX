@@ -48,6 +48,18 @@ def test_global_threshold_search_and_frontier_are_deterministic():
     assert all(row["microPrecision"] >= row["minimumPrecision"] for row in frontier)
 
 
+def test_grid_counts_treat_scores_equal_to_threshold_as_positive():
+    targets = np.asarray([[1], [0], [1], [0]])
+    probabilities = np.asarray([[0.5], [0.5], [0.499], [0.501]])
+    row = next(item for item in global_threshold_sweep(targets, probabilities, step=0.001) if item["threshold"] == 0.5)
+    assert row["confusion"] == {
+        "truePositive": 1,
+        "falsePositive": 2,
+        "falseNegative": 1,
+        "trueNegative": 0,
+    }
+
+
 def test_per_label_thresholds_use_global_fallback_for_rare_labels():
     targets = np.array([[1, 0], [0, 0], [0, 0], [0, 1], [0, 1]], dtype=np.int8)
     probabilities = np.array([[0.2, 0.1], [0.1, 0.2], [0.05, 0.1], [0.1, 0.4], [0.1, 0.5]])
