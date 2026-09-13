@@ -18,10 +18,10 @@ being represented as clinically evaluable results.
 
 ```text
 Patient context + same-indication candidate
-  -> LightGBM overall adverse-risk probability
+  -> safety gates (severe DDI / serious drug-disease restriction)
+  -> LightGBM overall adverse-risk probability for eligible candidates
   -> LightGBM split-conformal reliability information
   -> uncertainty-adjusted adverse risk
-  -> safety gates (severe DDI / serious drug-disease restriction)
   -> 50% adjusted adverse risk + 30% DDI + 20% drug-disease risk
 ```
 
