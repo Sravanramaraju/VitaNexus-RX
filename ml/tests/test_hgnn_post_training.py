@@ -8,6 +8,7 @@ from vitanexus_ml.models.hgnn_post_training import (
     EXPECTED_RUN_KEY,
     HGNN_POST_TRAINING_VERSION,
     _label_hash,
+    cache_frozen_holdout_predictions,
     cache_frozen_predictions,
     load_prediction_cache,
     verify_checkpoint_integrity,
@@ -61,3 +62,10 @@ def test_prediction_cache_preserves_label_order_and_reloads_without_pickle(tmp_p
 def test_pre_freeze_cache_api_cannot_read_holdout(tmp_path):
     with pytest.raises(RuntimeError, match="holdout is inaccessible"):
         cache_frozen_predictions(tmp_path / "missing.json", tmp_path, cohort="holdout")
+
+
+def test_holdout_cache_requires_integrity_and_completed_freeze(tmp_path):
+    frozen = tmp_path / "frozen.json"
+    frozen.write_text('{"status":"DRAFT"}', encoding="utf-8")
+    with pytest.raises(FileNotFoundError):
+        cache_frozen_holdout_predictions(tmp_path / "missing.json", frozen, tmp_path)

@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
-import shutil
-from dataclasses import asdict
 from pathlib import Path
 
 import joblib
@@ -173,9 +170,28 @@ def cache_frozen_predictions(
     model_kind: str = "selection",
     device_name: str | None = None,
 ) -> dict:
+    return _cache_frozen_predictions(
+        integrity_manifest_path,
+        cache_root,
+        cohort=cohort,
+        model_kind=model_kind,
+        device_name=device_name,
+        allow_holdout=False,
+    )
+
+
+def _cache_frozen_predictions(
+    integrity_manifest_path: Path,
+    cache_root: Path,
+    *,
+    cohort: str,
+    model_kind: str,
+    device_name: str | None,
+    allow_holdout: bool,
+) -> dict:
     if cohort not in WINDOWS:
         raise ValueError(f"Unknown HGNN evaluation cohort: {cohort}")
-    if cohort == "holdout":
+    if cohort == "holdout" and not allow_holdout:
         raise RuntimeError("The 2026 holdout is inaccessible to pre-freeze prediction caching")
     manifest = verify_checkpoint_integrity(integrity_manifest_path)
     device = torch.device(device_name or ("cuda" if torch.cuda.is_available() else "cpu"))
@@ -243,6 +259,36 @@ def cache_frozen_predictions(
     temporary.replace(paths["root"])
     verify_checkpoint_integrity(integrity_manifest_path)
     return metadata
+
+
+def cache_frozen_holdout_predictions(
+    integrity_manifest_path: Path,
+    frozen_manifest_path: Path,
+    cache_root: Path,
+    *,
+    device_name: str | None = None,
+) -> dict:
+    """Cache 2026 predictions only after a complete pre-2026 configuration freeze."""
+    integrity = verify_checkpoint_integrity(integrity_manifest_path)
+    frozen = json.loads(Path(frozen_manifest_path).read_text(encoding="utf-8"))
+    if frozen.get("status") != "FROZEN_BEFORE_2026_HOLDOUT":
+        raise RuntimeError("HGNN 2026 holdout access requires a completed pre-2026 freeze")
+    configuration = frozen.get("configuration")
+    if not configuration or frozen.get("configurationSha256") != stable_hash(configuration):
+        raise RuntimeError("Frozen HGNN post-training configuration is incomplete or changed")
+    expected_checkpoint = integrity["files"]["hgnn_selection_best.pt"]["sha256"]
+    if configuration.get("checkpointSha256") != expected_checkpoint:
+        raise RuntimeError("Frozen HGNN configuration does not reference the protected epoch-20 checkpoint")
+    if "2026" in json.dumps(frozen.get("optimizationCohorts", {})):
+        raise RuntimeError("Frozen HGNN optimization metadata contains a forbidden 2026 cohort")
+    return _cache_frozen_predictions(
+        integrity_manifest_path,
+        cache_root,
+        cohort="holdout",
+        model_kind="selection",
+        device_name=device_name,
+        allow_holdout=True,
+    )
 
 
 def load_prediction_cache(cache_root: Path, cache_name: str, *, expected_label_hash: str | None = None) -> dict:
