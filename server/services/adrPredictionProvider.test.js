@@ -6,7 +6,7 @@ const valid = {
   artifactMode: "FULL",
   model: "LightGBM", modelVersion: "l",
   versions: { preprocessing: "p", features: "f", lightgbm: "l", bootstrap: "b", conformal: "c" },
-  overall: { task: "serious-outcome classification among FAERS adverse-event reports", riskProbability: 0.2, riskPercent: 20, classification: "LOWER", threshold: 0.389, thresholdSource: "frozen_2025Q4_operating_threshold", uncertainty: { method: "bootstrap_model_variability", level: 0.9, lower: 0.1, upper: 0.3, replicas: 20 }, adjustedRisk: 0.3, conformal: { method: "split_conformal_classification", targetCoverage: 0.9, qHat: 0.7, predictionSet: ["NO_DOCUMENTED_SERIOUS_OUTCOME"], setSize: 1, reliability: "FOCUSED_NO_DOCUMENTED_SERIOUS_OUTCOME", interpretation: "Focused", calibrationVersion: "c", interval: null, intervalNote: "Prediction set" } },
+  overall: { task: "serious-outcome classification among FAERS adverse-event reports", riskProbability: 0.2, riskPercent: 20, uncertainty: { method: "bootstrap_model_variability", level: 0.9, lower: 0.1, upper: 0.3, replicas: 20 }, adjustedRisk: 0.3, conformal: { method: "split_conformal_classification", targetCoverage: 0.9, qHat: 0.7, predictionSet: ["NO_DOCUMENTED_SERIOUS_OUTCOME"], setSize: 1, reliability: "FOCUSED_NO_DOCUMENTED_SERIOUS_OUTCOME", interpretation: "Focused", calibrationVersion: "c", interval: null, intervalNote: "Prediction set" } },
   inputCoverage: { candidateKnown: true, indicationKnown: true, recognizedCurrentMedications: 1, unknownCurrentMedications: [] }, dataWindow: { fit: "2022Q1-2025Q2" }, generatedAt: new Date().toISOString(), clinicalInterpretation: { population: "FAERS", limitations: ["bias"] },
 };
 

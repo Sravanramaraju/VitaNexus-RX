@@ -19,9 +19,6 @@ const successfulPredictionSchema = z.object({
     task: z.literal("serious-outcome classification among FAERS adverse-event reports"),
     riskProbability: z.number().min(0).max(1),
     riskPercent: z.number().min(0).max(100),
-    classification: z.enum(["LOWER", "ELEVATED"]),
-    threshold: z.number().min(0).max(1),
-    thresholdSource: z.enum(["frozen_2025Q4_operating_threshold", "training_artifact_threshold"]),
     uncertainty: z.object({ method: z.literal("bootstrap_model_variability"), level: z.literal(0.9), lower: z.number().min(0).max(1), upper: z.number().min(0).max(1), replicas: z.number().int().positive() }),
     adjustedRisk: z.number().min(0).max(1),
     conformal: z.object({

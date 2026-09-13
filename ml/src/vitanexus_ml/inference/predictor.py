@@ -47,16 +47,6 @@ def _full_manifest(path: Path) -> dict:
     return manifest
 
 
-def _operating_threshold(report_root: Path, fallback: float) -> tuple[float, str]:
-    """Load the frozen 2025Q4-selected threshold when the audited report exists."""
-    report = _read_json(report_root / "lightgbm_operating_threshold.json")
-    selected = report and report.get("lockedHoldout2026", {}).get("frozenSelectedThreshold", {})
-    threshold = selected.get("threshold") if isinstance(selected, dict) else None
-    if isinstance(threshold, (float, int)) and 0.0 <= float(threshold) <= 1.0:
-        return float(threshold), "frozen_2025Q4_operating_threshold"
-    return float(fallback), "training_artifact_threshold"
-
-
 def _conformal_interpretation(labels: list[str]) -> tuple[str, str]:
     if not labels:
         return "UNAVAILABLE", "The conformal prediction set was empty; clinician review is required."
@@ -89,7 +79,10 @@ class LightGBMPredictor:
             raise ArtifactsUnavailable("Runtime requires 20 contiguous LightGBM bootstrap replicas.")
         self.bootstrap = [joblib.load(path) for path in replica_paths]
         self._validate_feature_schema()
-        self.threshold, self.threshold_source = _operating_threshold(report_root, self.serious["threshold"])
+        # report_root remains an accepted constructor argument for compatibility
+        # with existing callers. Runtime ranking consumes calibrated probabilities,
+        # not an offline-selected binary operating cutoff.
+        _ = report_root
 
     def _validate_feature_schema(self) -> None:
         builder = self.serious.get("featureBuilder")
@@ -128,9 +121,6 @@ class LightGBMPredictor:
             "task": "serious-outcome classification among FAERS adverse-event reports",
             "riskProbability": probability,
             "riskPercent": round(probability * 100, 2),
-            "classification": "ELEVATED" if probability >= self.threshold else "LOWER",
-            "threshold": self.threshold,
-            "thresholdSource": self.threshold_source,
             "uncertainty": {
                 "method": "bootstrap_model_variability",
                 "level": 0.90,
