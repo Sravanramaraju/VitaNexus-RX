@@ -17,6 +17,7 @@ import { activeSafetyResult, consultationResponse, mapAllergyInput, mapCondition
 import { buildRecommendationInput } from "./services/recommendationRankingService.js";
 import { createClinicalKnowledgeRepository } from "./repositories/clinicalKnowledgeRepository.js";
 import { resolveDrug } from "./services/drugResolver.js";
+import { eventRiskStatus } from "./services/eventRiskStatus.js";
 
 const asyncRoute = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
 const tokenFor = (clinician) => jwt.sign({ role: clinician.role }, config.jwtSecret, { subject: clinician.id, expiresIn: config.jwtExpiresIn });
@@ -204,6 +205,10 @@ export const createApp = () => {
   const getAdrPrediction = asyncRoute(async (req, res) => { const consultation = await getConsultation(prisma, req.auth.clinicianId, req.params.consultationId); const record = consultation.adrPredictions[0]; if (!record) throw Object.assign(new Error("No ADR prediction has been generated."), { status: 404, code: "PREDICTION_NOT_FOUND" }); send(res, 200, { id: record.id, ...record.result }, req.requestId); });
   app.get("/api/v1/consultations/:consultationId/adr-predictions", authenticate, getAdrPrediction);
   app.get("/api/v1/consultations/:consultationId/adr-prediction", authenticate, getAdrPrediction);
+  app.get("/api/v1/consultations/:consultationId/adverse-event-risks", authenticate, asyncRoute(async (req, res) => {
+    await getConsultation(prisma, req.auth.clinicianId, req.params.consultationId);
+    send(res, 200, eventRiskStatus, req.requestId);
+  }));
 
   app.post("/api/v1/consultations/:consultationId/recommendations", authenticate, asyncRoute(async (req, res) => {
     const consultation = await getConsultation(prisma, req.auth.clinicianId, req.params.consultationId); const storedSafety = consultation.analyses.find((item) => item.type === "SAFETY"); const safety = storedSafety?.engineVersion === versions.ENGINE_VERSION ? activeSafetyResult(storedSafety.result) : await clinicalSafetyAssessment({ consultation, patient: consultation.patient, knowledgeRepository }); const result = await recommendations({ consultation, patient: consultation.patient, knowledgeRepository, requestId: req.requestId }); const modelVersions = result.find((item) => item.ml?.versions)?.ml?.versions || { status: "ML_UNAVAILABLE" }; const inputHash = stableHash(buildRecommendationInput({ consultation, patient: consultation.patient, safety, candidates: result, modelVersions })); const recommendationVersion = `${versions.ENGINE_VERSION}|${recommendationRankingConfig.configId}|${stableHash(modelVersions).slice(0, 12)}`;

@@ -12,7 +12,7 @@ export default function AdverseEventRisks() {
   const visit = useMemo(() => patient?.visits.find((item) => item.id === visitId), [patient, visitId]);
   const [profile, setProfile] = useState(null);
 
-  useEffect(() => { getEventRiskProfile().then(setProfile); }, []);
+  useEffect(() => { getEventRiskProfile(visitId).then(setProfile).catch(() => setProfile({ status: "model_not_available", message: "Individual adverse-event model validation is in progress." })); }, [visitId]);
 
   if (!patient || !visit) return <div className="surface p-6">Consultation not found.</div>;
   return <section className="mx-auto max-w-4xl space-y-5">
