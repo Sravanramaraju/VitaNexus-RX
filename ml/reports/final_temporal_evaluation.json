@@ -1,30 +1,30 @@
 {
   "lightgbm": {
-    "auroc": 0.7396637495138079,
-    "auprc": 0.6354707045098551,
-    "f1": 0.4362242772640173,
-    "precision": 0.27916400085306037,
-    "recallSensitivity": 0.9973333333333333,
-    "specificity": 0.014002333722287048,
-    "brier": 0.636399926958842,
-    "ece": 0.6587351896375309,
-    "threshold": 0.19999999999999996,
+    "auroc": 0.8177307404429992,
+    "auprc": 0.8212351735842914,
+    "f1": 0.7816088221616337,
+    "precision": 0.6857031232513231,
+    "recallSensitivity": 0.9087045626146046,
+    "specificity": 0.525856141255633,
+    "brier": 0.17429113769613191,
+    "ece": 0.03577332291238326,
+    "threshold": 0.3499999999999999,
     "confusionMatrix": {
-      "tn": 96,
-      "fp": 6760,
-      "fn": 7,
-      "tp": 2618
+      "tn": 171305,
+      "fp": 154459,
+      "fn": 33856,
+      "tp": 336984
     }
   },
   "conformal": {
-    "empiricalCoverage": 0.28646767218647823,
-    "averageSetSize": 0.9948317688007594,
-    "singletonRate": 0.9948317688007594,
-    "ambiguousRate": 0.0,
-    "emptyRate": 0.005168231199240586,
-    "classConditionalCoverage_NO_DOCUMENTED_SERIOUS_OUTCOME": 0.01677362893815636,
-    "classConditionalCoverage_SERIOUS_OUTCOME": 0.9908571428571429
+    "empiricalCoverage": 0.873942727862602,
+    "averageSetSize": 1.3182625996979633,
+    "singletonRate": 0.6817374003020368,
+    "ambiguousRate": 0.3182625996979633,
+    "emptyRate": 0.0,
+    "classConditionalCoverage_NO_DOCUMENTED_SERIOUS_OUTCOME": 0.80950012892769,
+    "classConditionalCoverage_SERIOUS_OUTCOME": 0.9305522597346565
   },
-  "holdoutRows": 9481,
-  "fastMode": true
+  "holdoutRows": 696604,
+  "fastMode": false
 }

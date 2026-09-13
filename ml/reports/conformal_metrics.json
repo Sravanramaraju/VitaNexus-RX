@@ -1,17 +1,17 @@
 {
-  "version": "faers-split-conformal-1.0.0-fast-smoke",
+  "version": "faers-split-conformal-1.0.0",
   "calibrationCohort": "2025Q4",
   "alpha": 0.1,
   "targetCoverage": 0.9,
-  "qHat": 0.32608695652173914,
+  "qHat": 0.7082957619477006,
   "holdout2026": {
-    "empiricalCoverage": 0.28646767218647823,
-    "averageSetSize": 0.9948317688007594,
-    "singletonRate": 0.9948317688007594,
-    "ambiguousRate": 0.0,
-    "emptyRate": 0.005168231199240586,
-    "classConditionalCoverage_NO_DOCUMENTED_SERIOUS_OUTCOME": 0.01677362893815636,
-    "classConditionalCoverage_SERIOUS_OUTCOME": 0.9908571428571429
+    "empiricalCoverage": 0.873942727862602,
+    "averageSetSize": 1.3182625996979633,
+    "singletonRate": 0.6817374003020368,
+    "ambiguousRate": 0.3182625996979633,
+    "emptyRate": 0.0,
+    "classConditionalCoverage_NO_DOCUMENTED_SERIOUS_OUTCOME": 0.80950012892769,
+    "classConditionalCoverage_SERIOUS_OUTCOME": 0.9305522597346565
   },
-  "fastMode": true
+  "fastMode": false
 }

@@ -1,39 +1,51 @@
 {
   "cohort": "2025Q3",
   "method": "isotonic",
-  "fastMode": true,
-  "brierBefore": 0.09272918838178122,
-  "brierAfter": 0.032511475960389606,
-  "eceBefore": 0.20611160752680344,
-  "eceAfter": 5.536780416545729e-18,
+  "fastMode": false,
+  "brierBefore": 0.15598020498494528,
+  "brierAfter": 0.15150266738160886,
+  "eceBefore": 0.053390957186996865,
+  "eceAfter": 6.293537063903883e-17,
   "reliabilityPlotData": [
     {
-      "meanPredicted": 0.7902912621359254,
-      "fractionPositive": 0.7902912621359224
+      "meanPredicted": 0.0836787564767046,
+      "fractionPositive": 0.08367875647668394
     },
     {
-      "meanPredicted": 0.958333333333335,
-      "fractionPositive": 0.9583333333333334
+      "meanPredicted": 0.1510601010275015,
+      "fractionPositive": 0.1510601010274561
     },
     {
-      "meanPredicted": 0.9751633986927958,
-      "fractionPositive": 0.9751633986928104
+      "meanPredicted": 0.31201398517084483,
+      "fractionPositive": 0.3120139851708964
     },
     {
-      "meanPredicted": 0.9758454106280181,
-      "fractionPositive": 0.9758454106280193
+      "meanPredicted": 0.4552109135274824,
+      "fractionPositive": 0.4552109135273023
     },
     {
-      "meanPredicted": 0.9922239502332814,
-      "fractionPositive": 0.9922239502332815
+      "meanPredicted": 0.5575277777778385,
+      "fractionPositive": 0.5575277777777777
     },
     {
-      "meanPredicted": 0.995283018867929,
-      "fractionPositive": 0.9952830188679245
+      "meanPredicted": 0.6765612489988232,
+      "fractionPositive": 0.6765612489991993
     },
     {
-      "meanPredicted": 1.0,
-      "fractionPositive": 1.0
+      "meanPredicted": 0.7786640079758732,
+      "fractionPositive": 0.7786640079760718
+    },
+    {
+      "meanPredicted": 0.8707052671854858,
+      "fractionPositive": 0.870705267185308
+    },
+    {
+      "meanPredicted": 0.923482053002202,
+      "fractionPositive": 0.9234820530023482
+    },
+    {
+      "meanPredicted": 0.9711610088324962,
+      "fractionPositive": 0.9711610088326061
     }
   ]
 }
