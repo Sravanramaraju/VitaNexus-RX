@@ -4,9 +4,10 @@ import { createPythonAdrPredictionProvider } from "./adrPredictionProvider.js";
 const valid = {
   status: "ok",
   artifactMode: "FULL",
-  versions: { preprocessing: "p", features: "f", lightgbm: "l", bootstrap: "b", conformal: "c", hgnn: "h" },
-  overall: { task: "serious-outcome classification among FAERS adverse-event reports", calibratedProbability: 0.2, uncertainty: { method: "bootstrap", level: 0.9, lower: 0.1, upper: 0.3, replicas: 20 }, conservativeUpperBound: 0.3, conformal: { method: "split_conformal", targetCoverage: 0.9, qHat: 0.7, predictionSet: ["NO_DOCUMENTED_SERIOUS_OUTCOME"], setSize: 1, calibrationVersion: "c" } },
-  specificAdrs: [{ term: "Nausea", score: 0.4 }], inputCoverage: { candidateKnown: true, indicationKnown: true, recognizedCurrentMedications: 1, unknownCurrentMedications: [] }, dataWindow: { fit: "2022Q1-2025Q2" }, generatedAt: new Date().toISOString(), clinicalInterpretation: { population: "FAERS", limitations: ["bias"] },
+  model: "LightGBM", modelVersion: "l",
+  versions: { preprocessing: "p", features: "f", lightgbm: "l", bootstrap: "b", conformal: "c" },
+  overall: { task: "serious-outcome classification among FAERS adverse-event reports", riskProbability: 0.2, riskPercent: 20, classification: "LOWER", threshold: 0.389, thresholdSource: "frozen_2025Q4_operating_threshold", uncertainty: { method: "bootstrap_model_variability", level: 0.9, lower: 0.1, upper: 0.3, replicas: 20 }, adjustedRisk: 0.3, conformal: { method: "split_conformal_classification", targetCoverage: 0.9, qHat: 0.7, predictionSet: ["NO_DOCUMENTED_SERIOUS_OUTCOME"], setSize: 1, reliability: "FOCUSED_NO_DOCUMENTED_SERIOUS_OUTCOME", interpretation: "Focused", calibrationVersion: "c", interval: null, intervalNote: "Prediction set" } },
+  inputCoverage: { candidateKnown: true, indicationKnown: true, recognizedCurrentMedications: 1, unknownCurrentMedications: [] }, dataWindow: { fit: "2022Q1-2025Q2" }, generatedAt: new Date().toISOString(), clinicalInterpretation: { population: "FAERS", limitations: ["bias"] },
 };
 
 describe("Python ADR provider", () => {
@@ -16,7 +17,8 @@ describe("Python ADR provider", () => {
     const result = await provider.predict({ requestId: "r" });
     expect(result.status).toBe("ok");
     expect(result.artifactMode).toBe("FULL");
-    expect(result.overall.conservativeUpperBound).toBe(0.3);
+    expect(result.overall.adjustedRisk).toBe(0.3);
+    expect(result).not.toHaveProperty("specificAdrs");
   });
   it("never converts an unreachable service to LOW or zero", async () => {
     const provider = createPythonAdrPredictionProvider({ baseUrl: "http://ml", fetchImplementation: async () => { throw new Error("offline"); } });
@@ -25,7 +27,7 @@ describe("Python ADR provider", () => {
     expect(result).not.toHaveProperty("overall");
   });
   it("rejects malformed confidence-like output", async () => {
-    const provider = createPythonAdrPredictionProvider({ baseUrl: "http://ml", fetchImplementation: async () => ({ ok: true, json: async () => ({ ...valid, overall: { ...valid.overall, conservativeUpperBound: 0 } }) }) });
+    const provider = createPythonAdrPredictionProvider({ baseUrl: "http://ml", fetchImplementation: async () => ({ ok: true, json: async () => ({ ...valid, overall: { ...valid.overall, adjustedRisk: 0 } }) }) });
     expect((await provider.predict({ requestId: "r" })).status).toBe("INFERENCE_FAILED");
   });
 });

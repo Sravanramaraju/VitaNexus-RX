@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { config } from "../config.js";
 
-export const ADR_INPUT_CONTRACT_VERSION = "vitanexus-adr-faers-input-2.0";
-export const ADR_PROVIDER_VERSION = "python-faers-provider-1.0.0";
+export const ADR_INPUT_CONTRACT_VERSION = "vitanexus-lightgbm-overall-risk-input-3.0";
+export const ADR_PROVIDER_VERSION = "python-lightgbm-provider-2.0.0";
 
 const conformalLabels = z.enum(["NO_DOCUMENTED_SERIOUS_OUTCOME", "SERIOUS_OUTCOME"]);
 const successfulPredictionSchema = z.object({
@@ -14,23 +14,32 @@ const successfulPredictionSchema = z.object({
     lightgbm: z.string().min(1),
     bootstrap: z.string().min(1),
     conformal: z.string().min(1),
-    hgnn: z.string().min(1),
   }),
   overall: z.object({
     task: z.literal("serious-outcome classification among FAERS adverse-event reports"),
-    calibratedProbability: z.number().min(0).max(1),
-    uncertainty: z.object({ method: z.literal("bootstrap"), level: z.literal(0.9), lower: z.number().min(0).max(1), upper: z.number().min(0).max(1), replicas: z.number().int().positive().optional() }),
-    conservativeUpperBound: z.number().min(0).max(1),
-    conformal: z.object({ method: z.literal("split_conformal"), targetCoverage: z.literal(0.9), qHat: z.number().min(0).max(1), predictionSet: z.array(conformalLabels).max(2), setSize: z.number().int().min(0).max(2), calibrationVersion: z.string().min(1) }),
+    riskProbability: z.number().min(0).max(1),
+    riskPercent: z.number().min(0).max(100),
+    classification: z.enum(["LOWER", "ELEVATED"]),
+    threshold: z.number().min(0).max(1),
+    thresholdSource: z.enum(["frozen_2025Q4_operating_threshold", "training_artifact_threshold"]),
+    uncertainty: z.object({ method: z.literal("bootstrap_model_variability"), level: z.literal(0.9), lower: z.number().min(0).max(1), upper: z.number().min(0).max(1), replicas: z.number().int().positive() }),
+    adjustedRisk: z.number().min(0).max(1),
+    conformal: z.object({
+      method: z.literal("split_conformal_classification"), targetCoverage: z.literal(0.9), qHat: z.number().min(0).max(1),
+      predictionSet: z.array(conformalLabels).max(2), setSize: z.number().int().min(0).max(2),
+      reliability: z.enum(["UNAVAILABLE", "AMBIGUOUS", "FOCUSED_SERIOUS_OUTCOME", "FOCUSED_NO_DOCUMENTED_SERIOUS_OUTCOME"]),
+      interpretation: z.string().min(1), calibrationVersion: z.string().min(1), interval: z.null(), intervalNote: z.string().min(1),
+    }),
   }),
-  specificAdrs: z.array(z.object({ term: z.string().min(1).max(255), score: z.number().min(0).max(1) })).max(100),
+  model: z.literal("LightGBM"),
+  modelVersion: z.string().min(1),
   inputCoverage: z.object({ candidateKnown: z.boolean(), indicationKnown: z.boolean(), recognizedCurrentMedications: z.number().int().nonnegative(), unknownCurrentMedications: z.array(z.string()) }),
   dataWindow: z.record(z.string(), z.string()),
   generatedAt: z.string(),
   clinicalInterpretation: z.object({ population: z.string(), limitations: z.array(z.string()) }),
 }).superRefine((value, context) => {
   if (value.overall.uncertainty.lower > value.overall.uncertainty.upper) context.addIssue({ code: "custom", message: "Bootstrap lower bound exceeds upper bound." });
-  if (value.overall.conservativeUpperBound !== value.overall.uncertainty.upper) context.addIssue({ code: "custom", message: "Conservative upper bound must equal the bootstrap upper bound." });
+  if (value.overall.adjustedRisk !== value.overall.uncertainty.upper) context.addIssue({ code: "custom", message: "Adjusted risk must equal the established conservative bootstrap upper bound." });
   if (value.overall.conformal.setSize !== value.overall.conformal.predictionSet.length) context.addIssue({ code: "custom", message: "Conformal setSize does not match predictionSet." });
 });
 
@@ -82,7 +91,7 @@ export const createPythonAdrPredictionProvider = ({ baseUrl = config.adrMlBaseUr
 
   return Object.freeze({
     providerName: "PythonAdrModelProvider",
-    modelName: "faers-serious-lightgbm-and-specific-adr-hgnn",
+    modelName: "faers-serious-lightgbm",
     modelVersion: ADR_PROVIDER_VERSION,
     async predict(input) {
       const response = await request("/v1/predict", input);
