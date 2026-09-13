@@ -239,6 +239,7 @@ def _cache_frozen_predictions(
         raise RuntimeError(f"HGNN cache row count mismatch: wrote {offset:,}, expected {row_count:,}")
     for array in (caseids, targets, logits, probabilities):
         array.flush()
+    del array
     metadata = {
         "version": HGNN_POST_TRAINING_VERSION,
         "createdAt": utc_now(),
