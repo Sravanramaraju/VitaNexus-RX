@@ -123,13 +123,12 @@ def import_inference_bundle(
     artifact_root: Path,
     report_root: Path,
     *,
-    allow_lightgbm_only: bool = False,
+    allow_lightgbm_only: bool = True,
 ) -> dict:
-    """Import a checksum-verified bundle without requiring unfinished HGNN artifacts.
+    """Import a checksum-verified bundle for the active LightGBM-only runtime.
 
-    A LightGBM-only bundle is sufficient for the production overall-risk path.
-    Callers must opt in explicitly so legacy combined-bundle workflows retain their
-    strict all-components requirement.
+    A combined bundle remains verifiable for archival workflows, but no unfinished
+    HGNN artifact is required by the production overall-risk path.
     """
     manifest = verify_inference_bundle(bundle, require_all=not allow_lightgbm_only)
     staged: list[tuple[Path, Path]] = []

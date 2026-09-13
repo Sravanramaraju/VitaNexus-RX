@@ -152,7 +152,7 @@ From the local project root:
 
 ```powershell
 npm run ml:bundle:verify -- --bundle "D:\Path\To\vitanexus_full_inference"
-npm run ml:bundle:import -- --bundle "D:\Path\To\vitanexus_full_inference"
+npm run ml:bundle:import -- --bundle "D:\Path\To\lightgbm_full_inference"
 npm run ml:serve
 ```
 

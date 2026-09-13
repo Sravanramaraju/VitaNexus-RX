@@ -142,10 +142,10 @@ def main(argv: list[str] | None = None) -> int:
     export_inference_parser.add_argument("--component", choices=("lightgbm", "all"), default="all")
     verify_inference_parser = subparsers.add_parser("verify-inference-bundle")
     verify_inference_parser.add_argument("--bundle", type=Path, required=True)
-    verify_inference_parser.add_argument("--allow-lightgbm-only", action="store_true")
+    verify_inference_parser.add_argument("--require-hgnn", action="store_true", help="Require a legacy combined LightGBM+HGNN bundle.")
     import_inference_parser = subparsers.add_parser("import-inference-bundle")
     import_inference_parser.add_argument("--bundle", type=Path, required=True)
-    import_inference_parser.add_argument("--allow-lightgbm-only", action="store_true")
+    import_inference_parser.add_argument("--require-hgnn", action="store_true", help="Reject a LightGBM-only bundle for a legacy combined import.")
     hgnn_cache_parser = subparsers.add_parser("cache-hgnn-post-training")
     hgnn_cache_parser.add_argument("--snapshot-root", type=Path, required=True)
     hgnn_cache_parser.add_argument("--work-root", type=Path, required=True)
@@ -219,7 +219,7 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "verify-inference-bundle":
         from vitanexus_ml.artifact_bundle import verify_inference_bundle
 
-        result = verify_inference_bundle(args.bundle, require_all=not args.allow_lightgbm_only)
+        result = verify_inference_bundle(args.bundle, require_all=args.require_hgnn)
     elif args.command == "import-inference-bundle":
         from vitanexus_ml.artifact_bundle import import_inference_bundle
 
@@ -227,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
             args.bundle,
             ARTIFACT_ROOT,
             REPORT_ROOT,
-            allow_lightgbm_only=args.allow_lightgbm_only,
+            allow_lightgbm_only=not args.require_hgnn,
         )
     elif args.command == "cache-hgnn-post-training":
         from vitanexus_ml.models.hgnn_post_training import (

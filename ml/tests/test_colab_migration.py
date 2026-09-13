@@ -318,12 +318,7 @@ def test_lightgbm_only_bundle_can_be_imported_without_hgnn(tmp_path):
 
     bundle = tmp_path / "bundle"
     export_inference_bundle(artifacts, reports, bundle, component="lightgbm")
-    result = import_inference_bundle(
-        bundle,
-        tmp_path / "local-artifacts",
-        tmp_path / "local-reports",
-        allow_lightgbm_only=True,
-    )
+    result = import_inference_bundle(bundle, tmp_path / "local-artifacts", tmp_path / "local-reports")
 
     assert result["component"] == "lightgbm"
     assert (tmp_path / "local-artifacts" / "serious_outcome.joblib").exists()
