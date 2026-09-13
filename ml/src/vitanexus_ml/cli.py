@@ -145,6 +145,20 @@ def main(argv: list[str] | None = None) -> int:
     verify_inference_parser.add_argument("--allow-lightgbm-only", action="store_true")
     import_inference_parser = subparsers.add_parser("import-inference-bundle")
     import_inference_parser.add_argument("--bundle", type=Path, required=True)
+    hgnn_cache_parser = subparsers.add_parser("cache-hgnn-post-training")
+    hgnn_cache_parser.add_argument("--snapshot-root", type=Path, required=True)
+    hgnn_cache_parser.add_argument("--work-root", type=Path, required=True)
+    hgnn_cache_parser.add_argument("--cache-root", type=Path, required=True)
+    hgnn_cache_parser.add_argument("--device", choices=("cpu", "cuda"), default=None)
+    hgnn_audit_parser = subparsers.add_parser("optimize-hgnn-post-training")
+    hgnn_audit_parser.add_argument("--work-root", type=Path, required=True)
+    hgnn_audit_parser.add_argument("--cache-root", type=Path, required=True)
+    hgnn_audit_parser.add_argument("--report-root", type=Path, default=REPORT_ROOT)
+    hgnn_holdout_parser = subparsers.add_parser("evaluate-frozen-hgnn-holdout")
+    hgnn_holdout_parser.add_argument("--work-root", type=Path, required=True)
+    hgnn_holdout_parser.add_argument("--cache-root", type=Path, required=True)
+    hgnn_holdout_parser.add_argument("--report-root", type=Path, default=REPORT_ROOT)
+    hgnn_holdout_parser.add_argument("--device", choices=("cpu", "cuda"), default=None)
     serve_parser = subparsers.add_parser("serve")
     serve_parser.add_argument("--host", default="127.0.0.1")
     serve_parser.add_argument("--port", type=int, default=8000)
@@ -209,6 +223,40 @@ def main(argv: list[str] | None = None) -> int:
         from vitanexus_ml.artifact_bundle import import_inference_bundle
 
         result = import_inference_bundle(args.bundle, ARTIFACT_ROOT, REPORT_ROOT)
+    elif args.command == "cache-hgnn-post-training":
+        from vitanexus_ml.models.hgnn_post_training import (
+            cache_frozen_predictions,
+            create_checkpoint_integrity_manifest,
+        )
+
+        integrity_path = args.work_root / "checkpoint_integrity.json"
+        create_checkpoint_integrity_manifest(args.snapshot_root, integrity_path)
+        caches = {}
+        for cohort in ("validation", "calibration", "operating"):
+            caches[f"selection_{cohort}"] = cache_frozen_predictions(
+                integrity_path, args.cache_root, cohort=cohort, device_name=args.device,
+            )
+        caches["partialRefit_operating"] = cache_frozen_predictions(
+            integrity_path, args.cache_root, cohort="operating", model_kind="partialRefit", device_name=args.device,
+        )
+        result = {"integrityManifest": str(integrity_path), "caches": caches}
+    elif args.command == "optimize-hgnn-post-training":
+        from vitanexus_ml.models.hgnn_post_training_audit import run_preholdout_audit
+
+        result = run_preholdout_audit(
+            args.work_root / "checkpoint_integrity.json", args.cache_root, args.work_root, args.report_root,
+        )
+    elif args.command == "evaluate-frozen-hgnn-holdout":
+        from vitanexus_ml.models.hgnn_post_training_audit import run_frozen_holdout_evaluation
+
+        result = run_frozen_holdout_evaluation(
+            args.work_root / "checkpoint_integrity.json",
+            args.report_root / "hgnn_post_training_frozen_manifest.json",
+            args.cache_root,
+            args.work_root,
+            args.report_root,
+            device_name=args.device,
+        )
     elif args.command == "train-lightgbm":
         result = train_lightgbm(args.fast)
     elif args.command == "train-hgnn":
