@@ -7,7 +7,7 @@ export const ADR_PROVIDER_VERSION = "python-lightgbm-provider-2.0.0";
 const conformalLabels = z.enum(["NO_DOCUMENTED_SERIOUS_OUTCOME", "SERIOUS_OUTCOME"]);
 const successfulPredictionSchema = z.object({
   status: z.enum(["ok", "DEGRADED_COVERAGE"]),
-  artifactMode: z.enum(["FULL", "FAST_SMOKE"]),
+  artifactMode: z.literal("FULL"),
   versions: z.object({
     preprocessing: z.string().min(1),
     features: z.string().min(1).optional(),

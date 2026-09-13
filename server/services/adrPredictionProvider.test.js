@@ -30,4 +30,8 @@ describe("Python ADR provider", () => {
     const provider = createPythonAdrPredictionProvider({ baseUrl: "http://ml", fetchImplementation: async () => ({ ok: true, json: async () => ({ ...valid, overall: { ...valid.overall, adjustedRisk: 0 } }) }) });
     expect((await provider.predict({ requestId: "r" })).status).toBe("INFERENCE_FAILED");
   });
+  it("rejects a smoke artifact rather than treating it as clinical evidence", async () => {
+    const provider = createPythonAdrPredictionProvider({ baseUrl: "http://ml", fetchImplementation: async () => ({ ok: true, json: async () => ({ ...valid, artifactMode: "FAST_SMOKE" }) }) });
+    expect((await provider.predict({ requestId: "r" })).status).toBe("INFERENCE_FAILED");
+  });
 });
