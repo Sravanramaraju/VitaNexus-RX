@@ -61,6 +61,8 @@ The full LightGBM command refuses to start without a benchmark matching the immu
 
 The current production risk path is deliberately LightGBM-only. HGNN-specific adverse-event scoring remains an unavailable, clearly labelled future module; it is not loaded, used for conformal prediction, or used in alternative ranking.
 
+See [the frozen full LightGBM evaluation summary](docs/LIGHTGBM_EVALUATION_SUMMARY.md) for the untouched 2026 holdout results and the distinction between offline operating-point evaluation and live probability-based ranking.
+
 ## Environment
 
 Copy `.env.example` to `.env`. The important ML keys are:
