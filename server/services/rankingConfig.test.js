@@ -1,0 +1,21 @@
+import { describe, expect, it } from "vitest";
+import {
+  RANKING_WEIGHT_TOTAL,
+  RANKING_WEIGHTS,
+  normalizeDdiRisk,
+  normalizeDrugDiseaseRisk,
+} from "./rankingConfig.js";
+
+describe("safety-aware ranking configuration", () => {
+  it("uses exactly the locked 50/30/20 weighting", () => {
+    expect(RANKING_WEIGHTS).toEqual({ adjustedLightgbmRisk: 0.5, ddiRisk: 0.3, drugDiseaseRisk: 0.2 });
+    expect(RANKING_WEIGHT_TOTAL).toBe(1);
+  });
+
+  it("keeps missing evidence distinct from known low risk", () => {
+    expect(normalizeDdiRisk("NOT_EVALUATED")).toBeNull();
+    expect(normalizeDdiRisk("MINOR")).toBe(0.1);
+    expect(normalizeDrugDiseaseRisk("NOT_EVALUATED")).toBeNull();
+    expect(normalizeDrugDiseaseRisk("LOW")).toBe(0.1);
+  });
+});
