@@ -145,6 +145,7 @@ def main(argv: list[str] | None = None) -> int:
     verify_inference_parser.add_argument("--allow-lightgbm-only", action="store_true")
     import_inference_parser = subparsers.add_parser("import-inference-bundle")
     import_inference_parser.add_argument("--bundle", type=Path, required=True)
+    import_inference_parser.add_argument("--allow-lightgbm-only", action="store_true")
     hgnn_cache_parser = subparsers.add_parser("cache-hgnn-post-training")
     hgnn_cache_parser.add_argument("--snapshot-root", type=Path, required=True)
     hgnn_cache_parser.add_argument("--work-root", type=Path, required=True)
@@ -222,7 +223,12 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "import-inference-bundle":
         from vitanexus_ml.artifact_bundle import import_inference_bundle
 
-        result = import_inference_bundle(args.bundle, ARTIFACT_ROOT, REPORT_ROOT)
+        result = import_inference_bundle(
+            args.bundle,
+            ARTIFACT_ROOT,
+            REPORT_ROOT,
+            allow_lightgbm_only=args.allow_lightgbm_only,
+        )
     elif args.command == "cache-hgnn-post-training":
         from vitanexus_ml.models.hgnn_post_training import (
             cache_frozen_predictions,

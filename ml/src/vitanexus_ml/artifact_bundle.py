@@ -118,8 +118,20 @@ def verify_inference_bundle(bundle: Path, require_all: bool = True) -> dict:
     return manifest
 
 
-def import_inference_bundle(bundle: Path, artifact_root: Path, report_root: Path) -> dict:
-    manifest = verify_inference_bundle(bundle, require_all=True)
+def import_inference_bundle(
+    bundle: Path,
+    artifact_root: Path,
+    report_root: Path,
+    *,
+    allow_lightgbm_only: bool = False,
+) -> dict:
+    """Import a checksum-verified bundle without requiring unfinished HGNN artifacts.
+
+    A LightGBM-only bundle is sufficient for the production overall-risk path.
+    Callers must opt in explicitly so legacy combined-bundle workflows retain their
+    strict all-components requirement.
+    """
+    manifest = verify_inference_bundle(bundle, require_all=not allow_lightgbm_only)
     staged: list[tuple[Path, Path]] = []
     try:
         for item in manifest["files"]:

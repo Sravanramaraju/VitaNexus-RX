@@ -297,3 +297,34 @@ def test_legacy_full_bundle_remains_exportable_without_threshold_audit(tmp_path)
     bundled_paths = {item["path"] for item in result["files"]}
     assert "reports/lightgbm_operating_threshold.json" not in bundled_paths
     assert "reports/lightgbm_threshold_sweep.csv" not in bundled_paths
+
+
+def test_lightgbm_only_bundle_can_be_imported_without_hgnn(tmp_path):
+    artifacts = tmp_path / "artifacts"
+    reports = tmp_path / "reports"
+    (artifacts / "bootstrap").mkdir(parents=True)
+    reports.mkdir()
+    (artifacts / "training_manifest.json").write_text(json.dumps({
+        "fastMode": False, "fullFinalData": True, "config": {"bootstrap_replicas": 20}
+    }), encoding="utf-8")
+    joblib.dump({"fastMode": False}, artifacts / "serious_outcome.joblib")
+    for index in range(20):
+        joblib.dump({"replica": index}, artifacts / "bootstrap" / f"replica_{index:02d}.joblib")
+    for name in (
+        "lightgbm_baselines.csv", "calibration_metrics.json", "bootstrap_summary.json",
+        "conformal_metrics.json", "final_temporal_evaluation.json", "lightgbm_metrics.json",
+    ):
+        (reports / name).write_text("{}", encoding="utf-8")
+
+    bundle = tmp_path / "bundle"
+    export_inference_bundle(artifacts, reports, bundle, component="lightgbm")
+    result = import_inference_bundle(
+        bundle,
+        tmp_path / "local-artifacts",
+        tmp_path / "local-reports",
+        allow_lightgbm_only=True,
+    )
+
+    assert result["component"] == "lightgbm"
+    assert (tmp_path / "local-artifacts" / "serious_outcome.joblib").exists()
+    assert not (tmp_path / "local-artifacts" / "hgnn_state.pt").exists()
