@@ -59,7 +59,7 @@ Never report fast-mode metrics as final research results.
 
 The full LightGBM command refuses to start without a benchmark matching the immutable processed cohort and current configuration. Full training is checkpointed and resumes completed stages/replicas. It never silently switches to `--fast` or reduces the final 2022Q1–2025Q2 fit. See [ML_TRAINING_OPERATIONS.md](docs/ML_TRAINING_OPERATIONS.md) and the exact [Google Colab migration guide](docs/COLAB_ML_TRAINING.md).
 
-The current production risk path is deliberately LightGBM-only. HGNN-specific adverse-event scoring remains an unavailable, clearly labelled future module; it is not loaded, used for conformal prediction, or used in alternative ranking.
+The clinical ranking path remains deliberately LightGBM-only. A separate **Specific Event Profile** now serves the protected epoch-20 baseline HGNN checkpoint as supplementary, audit-pending evidence. It displays ordered event-label model scores—not patient-incidence probabilities—and is isolated from conformal prediction, clinical safety gates, candidate generation, recommendation scoring, and tie-breaking. See `docs/HGNN_EVENT_PROFILE.md` for the runtime contract and provenance.
 
 See [the frozen full LightGBM evaluation summary](docs/LIGHTGBM_EVALUATION_SUMMARY.md) for the untouched 2026 holdout results and the distinction between offline operating-point evaluation and live probability-based ranking.
 

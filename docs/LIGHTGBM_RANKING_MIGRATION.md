@@ -4,8 +4,9 @@
 
 This migration makes the full LightGBM serious-outcome model the only runtime
 ML dependency for overall adverse-risk assessment and alternative-drug ranking.
-It deliberately does not load, invoke, or rank with HGNN artifacts while the
-event-level model remains under validation.
+The ranking service deliberately does not load, invoke, or rank with HGNN
+artifacts. The independent Specific Event Profile may invoke the protected
+baseline HGNN, but it remains supplementary and audit pending.
 
 ## Runtime evidence requirements
 
@@ -27,5 +28,5 @@ Patient context + same-indication candidate
 
 Conformal uncertainty is an interpretation of the LightGBM estimate, not an
 independent clinical hazard. Allergy information remains visible to clinicians
-but does not enter automated ranking. HGNN is reserved for a future,
-event-level, supplementary interface and has no ranking or conformal role.
+but does not enter automated ranking. HGNN is served only through the separate
+event-level supplementary interface and has no ranking or conformal role.

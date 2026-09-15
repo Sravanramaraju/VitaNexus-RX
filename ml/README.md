@@ -19,6 +19,7 @@ Source package: `ml/src/vitanexus_ml`.
 - `colab/`: shared Drive/local-disk preflight code and numbered LightGBM/HGNN notebooks.
 - `conformal/split.py`: finite-sample-corrected split conformal classification.
 - `models/hgnn.py`: minibatched PyG HeteroData graphs, prevalence/OvR/MLP baselines, HGNN, per-label calibration.
+- `inference/hgnn_predictor.py`: cached, hash-verified CPU/GPU inference for the protected epoch-20 baseline checkpoint and ordered 100-event vocabulary. It returns supplementary event-label model scores only and never enters recommendation ranking.
 - `inference/predictor.py`: single and batch artifact-backed inference.
 - `api/app.py`: FastAPI internal service.
 

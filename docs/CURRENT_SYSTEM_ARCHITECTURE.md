@@ -2,8 +2,8 @@
 
 **Status:** authoritative runtime reference
 
-**Last verified:** 2026-08-24
-**Actual knowledge engine:** `vitanexus-knowledge-2.2.0`
+**Last verified:** 2026-09-15
+**Actual knowledge engine:** `vitanexus-knowledge-2.5.0`
 
 Older backend/frontend specifications are historical. This document describes the current code.
 
@@ -17,7 +17,10 @@ flowchart LR
   API --> ML["PythonAdrModelProvider"]
   ML --> FASTAPI["FastAPI :8000"]
   FASTAPI --> LGBM["Calibrated LightGBM + bootstrap + conformal classification set"]
-  UI --> HGNN["HGNN event-risk module: validation pending"]
+  UI --> EVENTAPI["Specific Event Profile"]
+  EVENTAPI --> API
+  API --> HGNN["Protected baseline HGNN: audit pending"]
+  HGNN --> FASTAPI
 ```
 
 The Python service loads artifacts once at startup. Express propagates request IDs, uses a bounded timeout, validates responses with Zod, and persists the result JSON. It never converts missing ML into zero/LOW risk.
@@ -29,6 +32,7 @@ The Python service loads artifacts once at startup. Express propagates request I
 | Patient / consultation | `/patients/new` | Patient and Consultation |
 | Clinical Safety | `/patients/:patientId`, Clinical Safety | ClinicalAnalysis |
 | Adverse Risk Assessment | `/patients/:patientId/consultations/:visitId/adr` | AdrPrediction |
+| Specific Event Profile | `/patients/:patientId/consultations/:visitId/adverse-event-risks` | HgnnEventPrediction |
 | Recommendations | `/patients/:patientId`, Recommendations | RecommendationSet |
 | Follow-up | PatientRecord follow-up step | FollowUp |
 
@@ -66,7 +70,7 @@ The LightGBM task is:
 
 It is not the probability that an exposed patient experiences any ADR. The point probability is isotonic-calibrated. Twenty bootstrap replicas are configured in full mode and produce a model-uncertainty range; the conservative upper bootstrap bound is the uncertainty-adjusted LightGBM risk used in ranking. Split conformal uses 2025Q4 and target coverage 0.90. Its output is a classification prediction set, not a probability-confidence interval and not an independent ranking weight.
 
-HGNN-specific MedDRA PT scoring is not part of the active backend model path. The event-risk UI route explicitly reports that validation is pending; it does not load an HGNN artefact, fabricate an event score, affect conformal output, or affect ranking.
+HGNN-specific event-label scoring is served through an independent supplementary path. FastAPI loads the hash-verified protected epoch-20 selection checkpoint and its ordered 100-label vocabulary once, constructs the same heterogeneous graph and features used in training, and returns deterministic top-K sigmoid model scores. The UI labels the model **Baseline** and **Audit Pending** and explicitly states that scores are not patient-incidence probabilities. Missing or mismatched artifacts produce an unavailable state without fabricated zeros. This path does not affect LightGBM, conformal output, safety gates, candidate generation, recommendation scoring, or tie-breaking.
 
 ### Laptop-safe training architecture
 
@@ -76,12 +80,15 @@ Bootstrap resampling remains at CASEID level but is represented by deterministic
 
 ### Safety-aware deterministic ranking
 
-The ranking engine is `vitanexus-safety-aware-50-30-20-1.0.0`:
+The ranking engine is `vitanexus-safety-aware-50-30-20-1.1.0`:
 
 1. A MAJOR/contraindicated DDI or HIGH/serious drug--disease restriction is flagged `NOT_RECOMMENDED` before scoring.
-2. Missing known-evidence or ML evidence is `REQUIRES_REVIEW`; it is never treated as zero risk.
-3. Eligible candidates use `0.50 * adjustedLightGBMRisk + 0.30 * ddiRisk + 0.20 * drugDiseaseRisk`.
-4. Lower final risk is safer; deterministic component and canonical-name ties make ordering reproducible.
+2. DDInter is explicitly tri-state: a resolved pair with a record uses MAJOR/MODERATE/MINOR; a resolved pair with a successful empty lookup is `NO_DOCUMENTED_INTERACTION` and remains eligible; unresolved, ambiguous, unavailable, or failed lookup evidence is `REQUIRES_REVIEW` and is never treated as zero risk.
+3. The ordinal source-evidence order is documented LOW/MINOR (`0.10`), successful lookup with no documented relationship (`0.30`), documented MODERATE (`0.50`), and documented HIGH/MAJOR (`0.90`).
+4. Eligible candidates use `0.50 * adjustedLightGBMRisk + 0.30 * ddiRisk + 0.20 * drugDiseaseRisk`.
+5. Lower final risk is safer; deterministic component and canonical-name ties make ordering reproducible.
+
+The recommendation UI keeps three concepts separate: the DDInter/DrugCentral source result, the deterministic safety gate, and LightGBM ranking readiness. An unsupported LightGBM input is displayed as `INPUT_CORRECTION_NEEDED`; it does not overwrite a completed `NO_DOCUMENTED_INTERACTION` source result with `REQUIRES_CLINICAL_REVIEW`.
 
 Rule-based “Why this rank?” text is stored with each candidate. No LLM or random score participates.
 
@@ -92,6 +99,8 @@ Python:
 - `GET /health`
 - `POST /v1/predict`
 - `POST /v1/predict-batch`
+- `POST /v1/lightgbm/input-coverage`
+- `POST /v1/lightgbm/term-coverage`
 
 Express:
 
@@ -100,7 +109,7 @@ Express:
 - legacy-compatible `GET .../adr-prediction`
 - `POST/GET /api/v1/consultations/:id/recommendations`
 
-The ADR page implements LOADING, SUCCESS, DEGRADED, UNAVAILABLE, and FAILED states. It displays calibrated probability, bootstrap range, conservative upper bound, conformal classification set, feature coverage, versions, data window, and FAERS limitations. The separate event-risk route transparently shows HGNN validation as pending.
+The ADR page implements LOADING, SUCCESS, INPUT-CORRECTION-NEEDED, UNAVAILABLE, and FAILED states. A calibrated probability, bootstrap range, conservative upper bound, and conformal classification set are displayed only when every protected LightGBM input is covered. An out-of-vocabulary sex, candidate drug, indication, or active medicine produces no percentage and opens a clinician-controlled correction workflow. The separate Specific Event Profile implements loading, success, limited-coverage, empty, and explicit-unavailable states; it shows ordered baseline HGNN event scores, provenance, and audit limitations.
 
 ## Persistence/version invalidation
 
@@ -110,7 +119,7 @@ The ADR page implements LOADING, SUCCESS, DEGRADED, UNAVAILABLE, and FAILED stat
 
 ## Failure and security behavior
 
-- `ML_UNAVAILABLE`, `INFERENCE_FAILED`, `OUT_OF_VOCABULARY`, and `DEGRADED_COVERAGE` are explicit.
+- LightGBM returns `OUT_OF_VOCABULARY` with no `overall` score when any required input is unsupported; `ML_UNAVAILABLE` and `INFERENCE_FAILED` are also explicit. `DEGRADED_COVERAGE` remains specific to the supplementary baseline HGNN and is never interpreted as a complete LightGBM result.
 - Fast artifacts include `-fast-smoke` versions and always render DEGRADED; they are not final models.
 - Express logs normal request metadata, not full clinical payloads.
 - Patient/consultation queries remain clinician-scoped.
@@ -118,4 +127,4 @@ The ADR page implements LOADING, SUCCESS, DEGRADED, UNAVAILABLE, and FAILED stat
 
 ## Scientific limitations
 
-FAERS is a spontaneous-reporting system with reporting and selection bias and no exposed-population denominator. Serious-outcome estimates are conditional on the learned reporting task. No documented interaction is not proof of safety. Allergy automation, HGNN event-risk deployment, and online feedback retraining are outside current scope.
+FAERS is a spontaneous-reporting system with reporting and selection bias and no exposed-population denominator. Serious-outcome estimates are conditional on the learned reporting task. HGNN event scores express learned label associations and are not individual event probabilities. No documented interaction is not proof of safety. HGNN calibration/external audit, allergy automation, and online feedback retraining remain outside current scope.

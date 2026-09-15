@@ -16,6 +16,7 @@ ml/training_state/
 ml/.pytest-*/
 /.pytest-*/
 ml/reports/*.png
+docs/.docx-render-*/
 __pycache__/
 *.py[cod]
 dist
