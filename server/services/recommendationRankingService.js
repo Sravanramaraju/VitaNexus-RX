@@ -37,8 +37,8 @@ export const buildRecommendationInput = ({ consultation, patient, safety, candid
   versions: { ranking: RANKING_ENGINE_VERSION, ...modelVersions },
 });
 
-const ddiTier = (severity) => severity === "MAJOR" ? "HIGH" : severity === "MODERATE" ? "MODERATE" : severity === "MINOR" ? "LOW" : "NOT_EVALUATED";
-const diseaseTier = (assessment) => ["LOW", "MODERATE", "HIGH"].includes(assessment) ? assessment : "NOT_EVALUATED";
+const ddiTier = (severity) => severity === "MAJOR" ? "HIGH" : severity === "MODERATE" ? "MODERATE" : severity === "MINOR" ? "LOW" : severity === "NO_DOCUMENTED_INTERACTION" ? "NO_DOCUMENTED_INTERACTION" : "NOT_EVALUATED";
+const diseaseTier = (assessment) => ["LOW", "NO_DOCUMENTED_RELATIONSHIP", "MODERATE", "HIGH"].includes(assessment) ? assessment : "NOT_EVALUATED";
 
 const candidateSafetyGate = ({ drugDrug, drugDisease }) => {
   if (isSevereDdi(drugDrug.severity)) return { status: "NOT_RECOMMENDED", reasons: ["Excluded from normal ranking because DDInter reports a major interaction."] };
@@ -49,29 +49,30 @@ const candidateSafetyGate = ({ drugDrug, drugDisease }) => {
 
 const evaluateKnownSafety = async ({ candidate, patient, knowledgeRepository }) => {
   const activeMedicines = patient.medications.filter((medicine) => medicine.status === "ACTIVE");
-  const candidateDdiKnown = activeMedicines.length ? await knowledgeRepository.hasDdiDrugEvidence(candidate.genericDrug) : true;
   const interactions = await Promise.all(activeMedicines.map(async (medicine) => {
-    const [relationship, existingKnown] = await Promise.all([
-      knowledgeRepository.findPairwiseDrugInteraction(candidate.genericDrug, medicine.genericName),
-      knowledgeRepository.hasDdiDrugEvidence(medicine.genericName),
-    ]);
-    if (relationship) return { status: "DATASET_MATCHED", existingMedication: medicine.genericName, proposedDrug: candidate.genericDrug, ...relationship };
-    if (candidateDdiKnown && existingKnown) return { status: "NO_INTERACTION_DETECTED", existingMedication: medicine.genericName, proposedDrug: candidate.genericDrug, source: "DDInter 2.0" };
-    return { status: "UNRESOLVED", existingMedication: medicine.genericName, proposedDrug: candidate.genericDrug, source: "DDInter 2.0" };
+    const evaluation = await knowledgeRepository.evaluateDdiPair(candidate.genericDrug, medicine.genericName);
+    const common = { existingMedication: medicine.genericName, proposedDrug: candidate.genericDrug, source: "DDInter 2.0", lookupCompleted: evaluation.lookupCompleted, candidateResolution: evaluation.candidateResolution, existingResolution: evaluation.existingResolution };
+    if (evaluation.status === "DOCUMENTED_INTERACTION") return { ...common, status: "DOCUMENTED_INTERACTION", ...evaluation.interaction };
+    if (evaluation.status === "NO_DOCUMENTED_INTERACTION") return { ...common, status: "NO_DOCUMENTED_INTERACTION" };
+    return { ...common, status: evaluation.status, issue: evaluation.status === "LOOKUP_FAILED" ? "DDInter lookup failed." : "One or both drug identifiers could not be resolved unambiguously." };
   }));
-  const interactionFindings = interactions.filter((item) => item.status === "DATASET_MATCHED");
-  const ddiSeverity = highestDdiSeverity(interactionFindings.map((finding) => finding.displaySeverity));
-  const ddiComplete = interactions.every((item) => item.status !== "UNRESOLVED");
+  const interactionFindings = interactions.filter((item) => item.status === "DOCUMENTED_INTERACTION");
+  const ddiComplete = interactions.every((item) => ["DOCUMENTED_INTERACTION", "NO_DOCUMENTED_INTERACTION"].includes(item.status));
+  const ddiSeverity = interactionFindings.length ? highestDdiSeverity(interactionFindings.map((finding) => finding.displaySeverity)) : ddiComplete ? "NO_DOCUMENTED_INTERACTION" : "NOT_EVALUATED";
 
   const diseaseEvaluation = await knowledgeRepository.findDrugDiseaseAssessments(candidate.genericDrug, patient.conditions);
   const diseaseFindings = Array.isArray(diseaseEvaluation) ? diseaseEvaluation : diseaseEvaluation.findings;
   const diseaseResolutions = Array.isArray(diseaseEvaluation) ? [] : diseaseEvaluation.resolutions;
-  const diseaseAssessment = highestDiseaseAssessment(diseaseFindings.map((finding) => finding.assessment));
   const diseaseComplete = patient.conditions.length === 0 || (diseaseResolutions.length === patient.conditions.length && diseaseResolutions.every((resolution) => resolution.status === "RESOLVED"));
+  const diseaseAssessment = diseaseFindings.length
+    ? highestDiseaseAssessment(diseaseFindings.map((finding) => finding.assessment))
+    : diseaseComplete
+      ? "NO_DOCUMENTED_RELATIONSHIP"
+      : "NOT_EVALUATED";
 
   const drugDrug = {
     severity: ddiSeverity,
-    evidenceTier: interactionFindings.length ? ddiTier(ddiSeverity) : ddiComplete ? "LOW" : "NOT_EVALUATED",
+    evidenceTier: ddiTier(ddiSeverity),
     complete: ddiComplete,
     evaluations: interactions,
     findings: interactionFindings,
@@ -79,11 +80,11 @@ const evaluateKnownSafety = async ({ candidate, patient, knowledgeRepository }) 
   };
   const drugDisease = {
     assessment: diseaseAssessment,
-    evidenceTier: diseaseFindings.length ? diseaseTier(diseaseAssessment) : diseaseComplete ? "LOW" : "NOT_EVALUATED",
+    evidenceTier: diseaseTier(diseaseAssessment),
     complete: diseaseComplete,
     findings: diseaseFindings,
     conditionResolutions: diseaseResolutions,
-    normalizedRisk: diseaseComplete ? (patient.conditions.length ? normalizeDrugDiseaseRisk(diseaseAssessment) ?? 0 : 0) : null,
+    normalizedRisk: diseaseComplete ? normalizeDrugDiseaseRisk(diseaseAssessment) : null,
   };
   const gate = candidateSafetyGate({ drugDrug, drugDisease });
   return {
@@ -93,7 +94,7 @@ const evaluateKnownSafety = async ({ candidate, patient, knowledgeRepository }) 
       complete: ddiComplete && diseaseComplete,
       label: ddiComplete && diseaseComplete ? "Fully evaluated evidence" : "Requires Clinical Review",
       unresolved: [
-        ...interactions.filter((item) => item.status === "UNRESOLVED").map((item) => `DDInter: ${item.existingMedication}`),
+        ...interactions.filter((item) => !["DOCUMENTED_INTERACTION", "NO_DOCUMENTED_INTERACTION"].includes(item.status)).map((item) => item.status === "LOOKUP_FAILED" ? `DDInter lookup failed: ${item.proposedDrug} + ${item.existingMedication}` : `DDInter identifier unresolved: ${item.proposedDrug} + ${item.existingMedication}`),
         ...diseaseResolutions.filter((item) => item.status !== "RESOLVED").map((item) => `DrugCentral: ${item.enteredCondition}`),
       ],
     },
@@ -115,11 +116,17 @@ const scoreCandidate = (candidate) => {
     };
   }
   if (!isMlAvailable(candidate)) {
+    const inputCorrectionNeeded = candidate.ml?.status === "OUT_OF_VOCABULARY";
     return {
       ...candidate,
-      status: "REQUIRES_REVIEW",
-      assessment: "REQUIRES_REVIEW",
-      reasons: [...candidate.gate.reasons, "LightGBM overall-risk evaluation is unavailable or has incomplete input coverage; no ranking score was inferred."],
+      status: inputCorrectionNeeded ? "INPUT_CORRECTION_NEEDED" : "RANKING_UNAVAILABLE",
+      assessment: inputCorrectionNeeded ? "INPUT_CORRECTION_NEEDED" : "RANKING_UNAVAILABLE",
+      reasons: [
+        ...candidate.gate.reasons,
+        inputCorrectionNeeded
+          ? "The DDInter and DrugCentral safety gate passed, but LightGBM could not rank this candidate because a consultation input is outside its trained vocabulary."
+          : "The DDInter and DrugCentral safety gate passed, but LightGBM ranking is currently unavailable; no ranking score was inferred.",
+      ],
     };
   }
   const adjustedRisk = normalizeProbability(candidate.ml.overall.adjustedRisk);

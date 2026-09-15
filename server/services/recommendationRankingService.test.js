@@ -19,10 +19,11 @@ const repository = {
   findCandidateDrugs: async () => [
     { genericDrug: "Current drug" }, { genericDrug: "Lower risk" }, { genericDrug: "Major DDI" }, { genericDrug: "Unknown evidence" },
   ],
-  hasDdiDrugEvidence: async (drug) => drug !== "Unknown evidence",
-  findPairwiseDrugInteraction: async (drug) => drug === "Major DDI"
-    ? { displaySeverity: "MAJOR", rawSeverity: "Major" }
-    : null,
+  evaluateDdiPair: async (drug) => drug === "Major DDI"
+    ? { status: "DOCUMENTED_INTERACTION", lookupCompleted: true, interaction: { displaySeverity: "MAJOR", rawSeverity: "Major" } }
+    : drug === "Unknown evidence"
+      ? { status: "UNRESOLVED", lookupCompleted: false, candidateResolution: { status: "UNRESOLVED" }, existingResolution: { status: "RESOLVED" } }
+      : { status: "NO_DOCUMENTED_INTERACTION", lookupCompleted: true, candidateResolution: { status: "RESOLVED" }, existingResolution: { status: "RESOLVED" } },
   findDrugDiseaseAssessments: async () => ({ findings: [], resolutions: [{ status: "RESOLVED" }] }),
 };
 
@@ -44,6 +45,39 @@ describe("safety-aware alternative ranking", () => {
     const unknown = results.find((item) => item.drug === "Unknown evidence");
     expect(unknown).toMatchObject({ status: "REQUIRES_REVIEW", rank: null });
     expect(unknown).not.toHaveProperty("finalRiskScore");
+  });
+
+  it("allows a resolved successful empty DDInter result to continue into ranking", async () => {
+    const results = await rankRecommendations({ consultation, patient, knowledgeRepository: repository, requestId: "test", provider });
+    const empty = results.find((item) => item.drug === "Lower risk");
+    expect(empty).toMatchObject({
+      status: "RECOMMENDED",
+      drugDrug: { severity: "NO_DOCUMENTED_INTERACTION", complete: true, normalizedRisk: 0.3 },
+      drugDisease: { assessment: "NO_DOCUMENTED_RELATIONSHIP", complete: true, normalizedRisk: 0.3 },
+    });
+    expect(empty.rank).toBeTypeOf("number");
+  });
+
+  it("keeps an actual lookup failure behind the clinical-review gate", async () => {
+    const failedRepository = { ...repository, evaluateDdiPair: async () => ({ status: "LOOKUP_FAILED", lookupCompleted: false }) };
+    const results = await rankRecommendations({ consultation, patient, knowledgeRepository: failedRepository, requestId: "test", provider });
+    expect(results.find((item) => item.drug === "Lower risk")).toMatchObject({ status: "REQUIRES_REVIEW", rank: null, drugDrug: { complete: false } });
+  });
+
+  it("does not mislabel a passed safety gate as clinical review when LightGBM input needs correction", async () => {
+    const outOfVocabularyProvider = {
+      predictBatch: async (inputs) => inputs.map(() => ({
+        status: "OUT_OF_VOCABULARY",
+        inputCoverage: { indicationKnown: false, candidateKnown: true, sexKnown: true, unknownCurrentMedications: [] },
+      })),
+    };
+    const results = await rankRecommendations({ consultation, patient, knowledgeRepository: repository, requestId: "test", provider: outOfVocabularyProvider });
+    expect(results.find((item) => item.drug === "Lower risk")).toMatchObject({
+      status: "INPUT_CORRECTION_NEEDED",
+      assessment: "INPUT_CORRECTION_NEEDED",
+      gate: { status: "ELIGIBLE" },
+      drugDrug: { severity: "NO_DOCUMENTED_INTERACTION", complete: true },
+    });
   });
 
   it("does not accept HGNN or allergy data as a scoring component", async () => {

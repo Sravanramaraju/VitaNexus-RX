@@ -3,6 +3,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { createGunzip } from "node:zlib";
 import { fileURLToPath } from "node:url";
+import { isPositiveDrugCentralIndication } from "../server/services/drugcentralRelationships.js";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const rawDirectory = path.join(projectRoot, "data", "raw", "durgcentral");
@@ -23,7 +24,9 @@ const drugDiseaseAssessment = (relationship) => {
   if (/precaution|monitor/.test(value)) return "LOW";
   return null;
 };
-const isIndication = (relationship) => /indicat|treat|therapy|used for/.test(relationship.toLowerCase());
+// DrugCentral also contains `contraindication`. Substring matching on `indicat`
+// incorrectly classified those rows as treatment indications. Only explicitly
+// positive relationship labels are allowed into the indication catalogue.
 
 // The dump is parsed as PostgreSQL COPY sections. No drug/disease pair is hard-coded:
 // relationship labels determine whether an imported row is a contraindication/caution
@@ -66,7 +69,7 @@ for await (const line of readDump()) {
     diseaseOut.write(`${JSON.stringify({ genericDrug, normalizedDrug: normalize(genericDrug), existingDisease: disease, normalizedDisease, diseaseIdentity, conceptName: conceptName || "", normalizedConceptName, umlsCui: umlsCui || null, snomedName: snomedName || null, normalizedSnomedName, relationship, assessment, evidence, source: "DrugCentral", datasetVersion: version })}\n`);
     diseaseCount += 1;
   }
-  if (isIndication(relationship)) {
+  if (isPositiveDrugCentralIndication(relationship)) {
     indicationOut.write(`${JSON.stringify({ indication: disease, normalizedIndication: normalize(disease), genericDrug, normalizedDrug: normalize(genericDrug), relationship, evidence, source: "DrugCentral", datasetVersion: version })}\n`);
     indicationCount += 1;
   }
