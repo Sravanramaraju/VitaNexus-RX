@@ -141,6 +141,7 @@ model Consultation {
   updatedAt               DateTime            @updatedAt
   analyses                ClinicalAnalysis[]
   adrPredictions          AdrPrediction[]
+  hgnnEventPredictions    HgnnEventPrediction[]
   recommendations         RecommendationSet[]
   notes                   DoctorNote[]
   followUps               FollowUp[]
@@ -173,6 +174,25 @@ model AdrPrediction {
   createdAt      DateTime     @default(now())
 
   @@unique([consultationId, modelVersion, inputHash])
+}
+
+model HgnnEventPrediction {
+  id                String       @id @default(uuid())
+  consultationId    String
+  consultation      Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
+  result            Json
+  modelVersion      String
+  checkpointVersion String
+  modelStage        String
+  validationStatus  String
+  inputHash         String
+  coverageStatus    String
+  status            String
+  generatedAt       DateTime
+  createdAt         DateTime     @default(now())
+
+  @@unique([consultationId, modelVersion, checkpointVersion, inputHash])
+  @@index([consultationId, createdAt])
 }
 
 model RecommendationSet {
