@@ -22,9 +22,13 @@ export function AuthProvider({ children }) {
     const result = await apiJson('/auth/login', 'POST', { email, password })
     setAccessToken(result.accessToken); setDoctor(result.clinician); return result.clinician
   }
+  const updateProfile = async ({ email, phone }) => {
+    const clinician = await apiJson('/auth/me', 'PATCH', { email, phone: phone || null })
+    setDoctor(clinician); return clinician
+  }
   const logout = async () => { try { await apiJson('/auth/logout', 'POST', {}) } finally { setAccessToken(null); setDoctor(null) } }
 
-  return <AuthContext.Provider value={{ doctor, authLoading, register, login, logout }}>{children}</AuthContext.Provider>
+  return <AuthContext.Provider value={{ doctor, authLoading, register, login, updateProfile, logout }}>{children}</AuthContext.Provider>
 }
 
 export const useAuth = () => {

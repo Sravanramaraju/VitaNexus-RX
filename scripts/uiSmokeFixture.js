@@ -1,6 +1,6 @@
 import process from "node:process";
 
-const baseUrl = "http://127.0.0.1:4000/api/v1";
+const baseUrl = process.env.SMOKE_API_BASE_URL || "http://127.0.0.1:4000/api/v1";
 const credentials = { email: "codex-ui-smoke@example.test", password: "UiSmokePass1!" };
 let token;
 const api = async (path, method = "GET", body) => {
@@ -24,7 +24,7 @@ if (process.argv.includes("--cleanup")) {
 let patient = existing[0] ? await api(`/patients/${existing[0].id}`) : await api("/patients", "POST", { name: "ML UI Smoke", age: 58, gender: "Male", conditions: [], allergies: [], medications: [{ genericName: "Warfarin", status: "active" }] });
 let consultation = patient.consultations?.find((item) => item.status === "in-progress");
 if (!consultation) {
-  const indication = (await api("/terminology/indications?q=pain&limit=1")).items[0];
+  const indication = (await api("/terminology/indications?q=pain&limit=20")).items.find((item) => item.modelSupported === true);
   const medicine = (await api("/terminology/medications?q=crocin&limit=1")).items[0];
   consultation = await api(`/patients/${patient.id}/consultations`, "POST", { indication: indication.display, indicationId: indication.id, indicationSource: indication.source, indicationDatasetVersion: indication.datasetVersion, candidateBrand: medicine.brand, candidateGeneric: medicine.genericName, dosage: "500 mg", frequency: "2d" });
   await api(`/consultations/${consultation.id}/clinical-safety-assessment`, "POST", {});

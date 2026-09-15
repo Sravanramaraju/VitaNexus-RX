@@ -19,7 +19,7 @@ const api = async (path, { method = "GET", body } = {}) => {
   return payload?.data;
 };
 
-const indication = (await api("/terminology/indications?q=pain&limit=1")).items[0];
+const indication = (await api("/terminology/indications?q=pain&limit=20")).items.find((item) => item.modelSupported === true);
 const medicine = (await api("/terminology/medications?q=crocin&limit=1")).items[0];
 if (!indication?.id || indication.source !== "DrugCentral" || !medicine?.id) throw new Error("Required DrugCentral/Indian Medicine test terminology is unavailable.");
 
@@ -53,7 +53,7 @@ try {
   const recommendations = await api(`/consultations/${consultation.id}/recommendations`, { method: "POST", body: {} });
   await api(`/consultations/${consultation.id}/follow-ups`, { method: "POST", body: { adverseEvent: "Nausea", severity: "Mild", durationDays: 1, notes: "Automated local smoke record." } });
   const refreshed = await api(`/patients/${patient.id}`);
-  if (adr.status !== "ok" && adr.status !== "DEGRADED_COVERAGE") throw new Error(`Expected available ML inference, received ${adr.status}`);
+  if (adr.status !== "ok") throw new Error(`Expected full-coverage ML inference, received ${adr.status}`);
   if (persistedAdr.versions?.lightgbm !== adr.versions?.lightgbm) throw new Error("Persisted ADR version does not match generated result.");
   if (!Array.isArray(recommendations.recommendations)) throw new Error("Recommendation response is missing candidates.");
   if (refreshed.consultations[0]?.followUps?.length !== 1) throw new Error("Follow-up did not persist.");
