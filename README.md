@@ -1,16 +1,90 @@
-# React + Vite
+# VitaNexus-RX
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+VitaNexus-RX is a B.Tech CSE clinical decision-support project that combines Indian medicine terminology, DDInter 2.0, DrugCentral, and a reproducible FAERS modelling subsystem. It is a research/demo system, not an autonomous prescriber or validated medical device.
 
-Currently, two official plugins are available:
+## Runtime workflow
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+1. Select an Indian brand/generic medicine and a required DrugCentral-backed indication.
+2. Evaluate the candidate against active medicines (DDInter) and resolved conditions (DrugCentral).
+3. Open the dedicated Adverse Risk Assessment page.
+4. Obtain a calibrated LightGBM serious-outcome estimate, a bootstrap uncertainty range, and a split-conformal classification prediction set.
+5. Apply safety gates first, then rank eligible same-indication alternatives using 50% uncertainty-adjusted LightGBM risk, 30% DDI risk, and 20% drug--disease risk. Lower risk is safer.
+6. Persist notes, analyses, recommendations, and follow-up in PostgreSQL.
 
-## React Compiler
+FAERS probabilities are conditional on the learned adverse-event reporting task. They are not population incidence.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Windows setup and run order
 
-## Expanding the ESLint configuration
+Prerequisites: Node.js, PostgreSQL, and Python 3.12 (CPU execution is supported).
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```powershell
+# 1. JavaScript dependencies and Prisma client
+npm install
+
+# 2. Database schema and clinical knowledge
+npx prisma migrate deploy
+npm run data:process
+npm run data:import
+
+# 3. Isolated Python environment
+py -3.12 -m venv ml\.venv
+ml\.venv\Scripts\python.exe -m pip install -r ml\requirements.txt
+
+# 4. Create processed FAERS data only when cohort.parquet does not already exist
+# npm run ml:preprocess
+
+# 5. Required laptop benchmark, then resumable full-data training
+npm run ml:benchmark
+npm run ml:train:lightgbm
+npm run ml:status
+npm run ml:train:hgnn
+npm run ml:evaluate
+
+# 6. Terminal A: internal model service
+npm run ml:serve
+
+# 7. Terminal B: Express API + Vite
+npm run dev
+```
+
+Development-only smoke runs are explicit and produce `-fast-smoke` artifact versions:
+
+```powershell
+npm run ml:preprocess -- --fast
+npm run ml:train:lightgbm -- --fast
+npm run ml:train:hgnn -- --fast
+```
+
+Never report fast-mode metrics as final research results.
+
+The full LightGBM command refuses to start without a benchmark matching the immutable processed cohort and current configuration. Full training is checkpointed and resumes completed stages/replicas. It never silently switches to `--fast` or reduces the final 2022Q1–2025Q2 fit. See [ML_TRAINING_OPERATIONS.md](docs/ML_TRAINING_OPERATIONS.md) and the exact [Google Colab migration guide](docs/COLAB_ML_TRAINING.md).
+
+The clinical ranking path remains deliberately LightGBM-only. A separate **Specific Event Profile** now serves the protected epoch-20 baseline HGNN checkpoint as supplementary, audit-pending evidence. It displays ordered event-label model scores—not patient-incidence probabilities—and is isolated from conformal prediction, clinical safety gates, candidate generation, recommendation scoring, and tie-breaking. See `docs/HGNN_EVENT_PROFILE.md` for the runtime contract and provenance.
+
+See [the frozen full LightGBM evaluation summary](docs/LIGHTGBM_EVALUATION_SUMMARY.md) for the untouched 2026 holdout results and the distinction between offline operating-point evaluation and live probability-based ranking.
+
+## Environment
+
+Copy `.env.example` to `.env`. The important ML keys are:
+
+```dotenv
+ADR_ML_BASE_URL=http://127.0.0.1:8000
+ADR_ML_TIMEOUT_MS=30000
+```
+
+The browser uses the same-origin `/api/v1` path. Vite proxies it to Express during development.
+
+## Verification
+
+```powershell
+npm run ml:test
+npm run api:test
+npm run lint
+npm run build
+npx prisma validate
+$env:PYTHONPATH=(Resolve-Path 'ml\src').Path
+ml\.venv\Scripts\python.exe ml\scripts\smoke_inference.py
+node scripts\smokeEndToEnd.js
+```
+
+See [CURRENT_SYSTEM_ARCHITECTURE.md](docs/CURRENT_SYSTEM_ARCHITECTURE.md), [DATASET_INTEGRATION.md](docs/DATASET_INTEGRATION.md), and [FINAL_ML_IMPLEMENTATION_REPORT.md](ml/reports/FINAL_ML_IMPLEMENTATION_REPORT.md).

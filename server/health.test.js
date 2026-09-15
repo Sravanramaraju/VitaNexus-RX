@@ -12,6 +12,19 @@ describe("API boundary", () => {
     expect(response.headers["x-request-id"]).toBeTruthy();
   });
 
+  it("allows a development frontend when Vite selects another loopback port", async () => {
+    const origin = "http://localhost:5174";
+    const response = await request(app).get("/api/v1/health").set("Origin", origin);
+    expect(response.status).toBe(200);
+    expect(response.headers["access-control-allow-origin"]).toBe(origin);
+  });
+
+  it("does not grant cross-origin access to an unconfigured remote origin", async () => {
+    const response = await request(app).get("/api/v1/health").set("Origin", "https://untrusted.example");
+    expect(response.status).toBe(200);
+    expect(response.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+
   it("returns a structured error for protected endpoints", async () => {
     const response = await request(app).get("/api/v1/patients");
     expect(response.status).toBe(401);

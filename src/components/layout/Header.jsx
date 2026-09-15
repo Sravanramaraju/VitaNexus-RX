@@ -9,7 +9,7 @@ export default function Header() {
   return <header className="app-header fixed inset-x-0 top-0 z-40 flex h-16 items-center justify-between border-b border-border bg-card/95 px-4 shadow-sm backdrop-blur md:px-6 dark:border-slate-700 dark:bg-slate-800/95">
     <span className="text-lg font-bold text-primary">VitaNexus-RX</span>
     <div className="flex items-center gap-3">
-      <div className="hidden items-center gap-2 sm:flex"><span className="grid h-8 w-8 place-items-center rounded-full bg-primary/10 text-primary"><User size={16} /></span><span className="text-sm font-semibold">{doctor?.name}</span></div>
+      <button type="button" onClick={() => navigate('/profile')} aria-label="Open doctor profile" title="Open doctor profile" className="flex items-center gap-2 rounded-full border border-transparent px-1.5 py-1 transition hover:border-white/20 hover:bg-white/10"><span className="grid h-8 w-8 place-items-center rounded-full bg-primary/10 text-primary"><User size={16} /></span><span className="hidden text-sm font-semibold sm:inline">{doctor?.name}</span></button>
       <button type="button" onClick={toggleTheme} aria-label="Toggle dark mode" className="grid h-9 w-9 place-items-center rounded-full border border-border transition hover:-translate-y-0.5 dark:border-slate-600">{theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}</button>
       <button type="button" onClick={leave} className="btn-secondary px-3" aria-label="Log out"><LogOut size={16} /><span className="hidden sm:inline">Logout</span></button>
     </div>

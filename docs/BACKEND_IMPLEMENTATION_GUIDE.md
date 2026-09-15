@@ -1,6 +1,6 @@
 # VitaNexus-RX Backend Implementation Guide
 
-> **Current implementation notice:** This setup guide predates the complete dataset pipeline. Use [CURRENT_SYSTEM_ARCHITECTURE.md](CURRENT_SYSTEM_ARCHITECTURE.md) for the authoritative current system behavior and [DATASET_INTEGRATION.md](DATASET_INTEGRATION.md) for source processing/import commands. The active safety and recommendation flow is DDInter + DrugCentral; it does not use ML/FAERS outputs.
+> **Historical setup notice:** This guide predates the completed dataset and FAERS ML integration. Use [CURRENT_SYSTEM_ARCHITECTURE.md](CURRENT_SYSTEM_ARCHITECTURE.md) for authoritative behavior, [DATASET_INTEGRATION.md](DATASET_INTEGRATION.md) for source processing, and [../ml/README.md](../ml/README.md) for model training and serving. Sections below that describe demonstration-only services are retained only as implementation history.
 
 ## Status and scope
 

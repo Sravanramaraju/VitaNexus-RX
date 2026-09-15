@@ -7,10 +7,22 @@ const ddinterSynonyms = Object.freeze({
   paracetamol: "acetaminophen",
   "paracetamol acetaminophen": "acetaminophen",
 });
+// DDInter sometimes repeats a drug token in parentheses, for example
+// "Insulin aspart (aspart)". Remove a parenthetical only when every qualifier
+// token is already present outside it. Meaningful qualifiers such as
+// "(topical)" or "(aspart protamine)" remain distinct.
+export const normalizeDdinterDrugName = (value = "") => {
+  const source = String(value || "");
+  const outsideTokens = new Set(normalizeClinicalTerm(source.replace(/\([^)]*\)/g, " ")).split(" ").filter(Boolean));
+  return normalizeClinicalTerm(source.replace(/\(([^)]*)\)/g, (full, qualifier) => {
+    const qualifierTokens = normalizeClinicalTerm(qualifier).split(" ").filter(Boolean);
+    return qualifierTokens.length && qualifierTokens.every((token) => outsideTokens.has(token)) ? "" : full;
+  }));
+};
 const ddiTerms = (value = "") => [...new Set(
   String(value)
     .split(/[+/]/)
-    .map((part) => normalizeClinicalTerm(part))
+    .map((part) => normalizeDdinterDrugName(part))
     .filter(Boolean)
     .map((term) => ddinterSynonyms[term] || term),
 )];
@@ -33,34 +45,96 @@ export const highestDdiSeverity = (values) =>
 export const highestDiseaseAssessment = (values) =>
   values.reduce((highest, value) => (assessmentOrder[value] > assessmentOrder[highest] ? value : highest), "NOT_EVALUATED");
 
-export const createClinicalKnowledgeRepository = (client) => ({
-  async findPairwiseDrugInteraction(candidateDrug, existingDrug) {
-    const candidateTerms = ddiTerms(candidateDrug);
-    const existingTerms = ddiTerms(existingDrug);
-    if (!candidateTerms.length || !existingTerms.length) return null;
-    const pairs = candidateTerms.flatMap((candidateTerm) => existingTerms.map((existingTerm) => {
-      const [normalizedDrugA, normalizedDrugB] = canonicalPair(candidateTerm, existingTerm);
-      return { normalizedDrugA, normalizedDrugB };
-    })).filter((pair) => pair.normalizedDrugA !== pair.normalizedDrugB);
-    if (!pairs.length) return null;
+export const createClinicalKnowledgeRepository = (client) => {
+  const resolveDdinterDrug = async (drug) => {
+    const terms = ddiTerms(drug);
+    if (!terms.length) return { status: "UNRESOLVED", enteredDrug: drug, terms: [], entities: [], reason: "EMPTY_TERM" };
     const records = await client.drugInteractionKnowledge.findMany({
-      where: { source: "DDInter 2.0", OR: pairs },
-      orderBy: { importedAt: "desc" },
+      where: {
+        source: "DDInter 2.0",
+        OR: terms.flatMap((term) => [
+          { normalizedDrugA: term }, { normalizedDrugA: { startsWith: `${term} ` } },
+          { normalizedDrugB: term }, { normalizedDrugB: { startsWith: `${term} ` } },
+        ]),
+      },
     });
-    const record = records.sort((first, second) => severityOrder[second.displaySeverity] - severityOrder[first.displaySeverity])[0];
-    if (!record) return null;
+    const resolutions = terms.map((term) => {
+      const entities = records.flatMap((record) => [
+        ...(normalizeDdinterDrugName(record.drugA) === term ? [{ id: record.ddinterIdA, name: record.drugA, normalizedName: term }] : []),
+        ...(normalizeDdinterDrugName(record.drugB) === term ? [{ id: record.ddinterIdB, name: record.drugB, normalizedName: term }] : []),
+      ]).filter((entity, index, list) => list.findIndex((item) => (item.id || item.name) === (entity.id || entity.name)) === index);
+      if (!entities.length) return { term, status: "UNRESOLVED", entities: [] };
+      if (entities.length > 1) return { term, status: "AMBIGUOUS", entities };
+      return { term, status: "RESOLVED", entities };
+    });
+    const unresolved = resolutions.filter((item) => item.status !== "RESOLVED");
     return {
-      drugA: record.drugA,
-      drugB: record.drugB,
-      rawSeverity: record.rawSeverity,
-      displaySeverity: record.displaySeverity,
-      source: record.source,
-      datasetVersion: record.datasetVersion,
-      ddinterIdA: record.ddinterIdA,
-      ddinterIdB: record.ddinterIdB,
-      matchedCandidateIngredients: candidateTerms,
-      matchedExistingIngredients: existingTerms,
+      status: unresolved.length ? (unresolved.some((item) => item.status === "AMBIGUOUS") ? "AMBIGUOUS" : "UNRESOLVED") : "RESOLVED",
+      enteredDrug: drug,
+      terms,
+      entities: resolutions.flatMap((item) => item.status === "RESOLVED" ? item.entities : []),
+      termResolutions: resolutions,
+      source: "DDInter 2.0",
     };
+  };
+
+  const evaluateDdiPair = async (candidateDrug, existingDrug) => {
+    try {
+      const [candidateResolution, existingResolution] = await Promise.all([
+        resolveDdinterDrug(candidateDrug),
+        resolveDdinterDrug(existingDrug),
+      ]);
+      if (candidateResolution.status !== "RESOLVED" || existingResolution.status !== "RESOLVED") {
+        return { status: "UNRESOLVED", lookupCompleted: false, candidateResolution, existingResolution, source: "DDInter 2.0" };
+      }
+      const pairs = candidateResolution.entities.flatMap((candidate) => existingResolution.entities.flatMap((existing) => {
+        if (candidate.id && existing.id) return [
+          { ddinterIdA: candidate.id, ddinterIdB: existing.id },
+          { ddinterIdA: existing.id, ddinterIdB: candidate.id },
+        ];
+        const [normalizedDrugA, normalizedDrugB] = canonicalPair(candidate.normalizedName, existing.normalizedName);
+        return normalizedDrugA === normalizedDrugB ? [] : [{ normalizedDrugA, normalizedDrugB }];
+      }));
+      const records = pairs.length ? await client.drugInteractionKnowledge.findMany({
+        where: { source: "DDInter 2.0", OR: pairs },
+        orderBy: { importedAt: "desc" },
+      }) : [];
+      const record = records.sort((first, second) => severityOrder[second.displaySeverity] - severityOrder[first.displaySeverity])[0];
+      if (!record) return { status: "NO_DOCUMENTED_INTERACTION", lookupCompleted: true, candidateResolution, existingResolution, source: "DDInter 2.0" };
+      return {
+        status: "DOCUMENTED_INTERACTION",
+        lookupCompleted: true,
+        candidateResolution,
+        existingResolution,
+        interaction: {
+          drugA: record.drugA,
+          drugB: record.drugB,
+          rawSeverity: record.rawSeverity,
+          displaySeverity: record.displaySeverity,
+          source: record.source,
+          datasetVersion: record.datasetVersion,
+          ddinterIdA: record.ddinterIdA,
+          ddinterIdB: record.ddinterIdB,
+          matchedCandidateIngredients: candidateResolution.terms,
+          matchedExistingIngredients: existingResolution.terms,
+        },
+        source: "DDInter 2.0",
+      };
+    } catch {
+      return { status: "LOOKUP_FAILED", lookupCompleted: false, candidateResolution: null, existingResolution: null, source: "DDInter 2.0" };
+    }
+  };
+
+  return {
+  resolveDdinterDrug,
+  evaluateDdiPair,
+  async hasDdiDrugEvidence(drug) {
+    return (await resolveDdinterDrug(drug)).status === "RESOLVED";
+  },
+
+  async findPairwiseDrugInteraction(candidateDrug, existingDrug) {
+    const evaluation = await evaluateDdiPair(candidateDrug, existingDrug);
+    return evaluation.status === "DOCUMENTED_INTERACTION" ? evaluation.interaction : null;
   },
 
   async findDrugDiseaseAssessments(candidateDrug, conditions) {
@@ -159,4 +233,5 @@ export const createClinicalKnowledgeRepository = (client) => ({
       datasetVersion: record.datasetVersion,
     }));
   },
-});
+  };
+};

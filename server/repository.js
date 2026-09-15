@@ -1,11 +1,14 @@
 import { Prisma } from "@prisma/client";
 import { fromMedicationStatus, toMedicationStatus } from "./utils.js";
+import { ADR_INPUT_CONTRACT_VERSION } from "./services/adrPredictionProvider.js";
+import { CLINICAL_ENGINE_VERSION } from "./services/clinicalEngineVersion.js";
+import { rankingConfig } from "./services/rankingConfig.js";
 
 export const patientInclude = {
   conditions: { where: { isActive: true } },
   allergies: { where: { isActive: true } },
   medications: { orderBy: { createdAt: "asc" } },
-  consultations: { orderBy: { createdAt: "desc" }, include: { followUps: { orderBy: { createdAt: "desc" } }, notes: { orderBy: { updatedAt: "desc" }, take: 1 }, analyses: { orderBy: { createdAt: "desc" } }, adrPredictions: { orderBy: { createdAt: "desc" }, take: 1 }, recommendations: { orderBy: { createdAt: "desc" }, take: 1 } } },
+  consultations: { orderBy: { createdAt: "desc" }, include: { followUps: { orderBy: { createdAt: "desc" } }, notes: { orderBy: { updatedAt: "desc" }, take: 1 }, analyses: { orderBy: { createdAt: "desc" } }, adrPredictions: { orderBy: { createdAt: "desc" }, take: 1 }, hgnnEventPredictions: { orderBy: { createdAt: "desc" }, take: 1 }, recommendations: { orderBy: { createdAt: "desc" }, take: 1 } } },
 };
 
 export const mapMedicationInput = (medication) => ({
@@ -54,14 +57,16 @@ export const consultationResponse = (consultation) => ({
   id: consultation.id,
   patientId: consultation.patientId,
   indication: consultation.indication,
+  indicationProvenance: { id: consultation.indicationId || null, normalizedName: consultation.indicationNormalized || null, source: consultation.indicationSource || "LEGACY_FREE_TEXT", datasetVersion: consultation.indicationDatasetVersion || null },
   prescription: { enteredName: consultation.candidateEnteredName || consultation.candidateBrand || consultation.candidateGeneric, normalizedName: consultation.candidateNormalizedName, brand: consultation.candidateBrand, generic: consultation.candidateGeneric, mappingSource: consultation.candidateMappingSource, mappingVersion: consultation.candidateMappingVersion, dosage: consultation.dosage, frequency: consultation.frequency, route: consultation.route },
   status: consultation.status.toLowerCase().replace("_", "-"),
   version: consultation.version,
   createdAt: consultation.createdAt,
   updatedAt: consultation.updatedAt,
-  latestSafetyAssessment: activeSafetyResult(consultation.analyses?.find((item) => item.type === "SAFETY")?.result),
-  adrPrediction: consultation.adrPredictions?.[0]?.result || null,
-  recommendations: consultation.recommendations?.[0]?.recommendations || null,
+  latestSafetyAssessment: activeSafetyResult(consultation.analyses?.find((item) => item.type === "SAFETY" && item.engineVersion === CLINICAL_ENGINE_VERSION)?.result),
+  adrPrediction: consultation.adrPredictions?.find((item) => item.result?.inputContractVersion === ADR_INPUT_CONTRACT_VERSION)?.result || null,
+  eventProfile: consultation.hgnnEventPredictions?.[0]?.result || null,
+  recommendations: consultation.recommendations?.find((item) => item.engineVersion?.startsWith(`${CLINICAL_ENGINE_VERSION}|${rankingConfig.configId}|`))?.recommendations || null,
   latestNote: consultation.notes?.[0] ? { text: consultation.notes[0].text, updatedAt: consultation.notes[0].updatedAt } : null,
   followUps: consultation.followUps?.map((item) => ({ id: item.id, adverseEvent: item.adverseEvent, eventCode: item.eventCode, severity: item.severity, durationDays: item.durationDays, notes: item.notes, createdAt: item.createdAt })) || [],
 });

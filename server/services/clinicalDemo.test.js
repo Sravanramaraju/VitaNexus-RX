@@ -6,9 +6,20 @@ import { buildRecommendationInput } from "./recommendationRankingService.js";
 const consultation = { id: "consultation-1", candidateGeneric: "Ibuprofen", indication: "Pain" };
 const patient = { age: 60, conditions: [{ display: "Chronic kidney disease" }], allergies: [], medications: [{ genericName: "Warfarin", status: "ACTIVE" }] };
 const knowledgeRepository = {
-  findPairwiseDrugInteraction: async (candidate, existing) => candidate === "Ibuprofen" && existing === "Warfarin" ? { drugA: "Ibuprofen", drugB: "Warfarin", rawSeverity: "Major", displaySeverity: "MAJOR", source: "DDInter 2.0", datasetVersion: "DDInter 2.0 import 2026-08-11" } : null,
-  findDrugDiseaseAssessments: async (candidate, conditions) => candidate === "Ibuprofen" && conditions.some((condition) => condition.display === "Chronic kidney disease") ? [{ existingDisease: "Chronic kidney disease", proposedDrug: "Ibuprofen", assessment: "HIGH", relationship: "contraindicated in", evidence: "contraindicated in chronic kidney disease", source: "DrugCentral", datasetVersion: "DrugCentral 20231101" }] : [],
+  evaluateDdiPair: async (candidate, existing) => candidate === "Ibuprofen" && existing === "Warfarin"
+    ? { status: "DOCUMENTED_INTERACTION", lookupCompleted: true, interaction: { drugA: "Ibuprofen", drugB: "Warfarin", rawSeverity: "Major", displaySeverity: "MAJOR", source: "DDInter 2.0", datasetVersion: "DDInter 2.0 import 2026-08-11" } }
+    : { status: "NO_DOCUMENTED_INTERACTION", lookupCompleted: true },
+  findDrugDiseaseAssessments: async (candidate, conditions) => candidate === "Ibuprofen" && conditions.some((condition) => condition.display === "Chronic kidney disease")
+    ? { findings: [{ existingDisease: "Chronic kidney disease", proposedDrug: "Ibuprofen", assessment: "HIGH", relationship: "contraindicated in", evidence: "contraindicated in chronic kidney disease", source: "DrugCentral", datasetVersion: "DrugCentral 20231101" }], resolutions: [{ enteredCondition: "Chronic kidney disease", status: "RESOLVED" }] }
+    : { findings: [], resolutions: conditions.map((condition) => ({ enteredCondition: condition.display, status: "RESOLVED" })) },
   findCandidateDrugs: async (indication) => indication === "Pain" ? [{ genericDrug: "Paracetamol", relationship: "has indication", evidence: "Pain", source: "DrugCentral", datasetVersion: "DrugCentral 20231101" }, { genericDrug: "Ibuprofen", relationship: "has indication", evidence: "Pain", source: "DrugCentral", datasetVersion: "DrugCentral 20231101" }] : [],
+};
+const provider = {
+  predictBatch: async (inputs) => inputs.map(() => ({
+    status: "ok",
+    overall: { adjustedRisk: 0.3, conformal: { predictionSet: ["NO_DOCUMENTED_SERIOUS_OUTCOME"] } },
+    versions: { lightgbm: "test", bootstrap: "test", conformal: "test", preprocessing: "test" },
+  })),
 };
 
 describe("dataset-backed clinical service contracts", () => {
@@ -18,6 +29,20 @@ describe("dataset-backed clinical service contracts", () => {
     expect(result.drugDrug.findings[0]).toMatchObject({ rawSeverity: "Major", displaySeverity: "MAJOR", source: "DDInter 2.0" });
     expect(result.drugDrug.evaluatedPairs).toEqual([expect.objectContaining({ proposedDatasetTerms: ["ibuprofen"], existingDatasetTerms: ["warfarin"] })]);
     expect(JSON.stringify(result)).not.toContain("riskPercentage");
+  });
+
+  it("labels a resolved successful empty lookup as no documented interaction", async () => {
+    const result = await clinicalSafetyAssessment({ consultation: { ...consultation, candidateGeneric: "Paracetamol" }, patient, knowledgeRepository });
+    expect(result.drugDrug).toMatchObject({ severity: "NO_DOCUMENTED_INTERACTION", complete: true, dataStatus: "NO_DOCUMENTED_INTERACTION" });
+    expect(result.drugDisease).toMatchObject({ assessment: "NO_DOCUMENTED_RELATIONSHIP", complete: true, dataStatus: "NO_DOCUMENTED_RELATIONSHIP" });
+    expect(result.overall).toMatchObject({ assessment: "NO_DOCUMENTED_RELATIONSHIP", dataStatus: "NO_DOCUMENTED_RELATIONSHIP" });
+    expect(result.drugDrug.explanations[0]).toContain("lookup completed");
+  });
+
+  it("labels unresolved identifiers as incomplete evidence requiring review", async () => {
+    const unresolvedRepository = { ...knowledgeRepository, evaluateDdiPair: async () => ({ status: "UNRESOLVED", lookupCompleted: false }) };
+    const result = await clinicalSafetyAssessment({ consultation, patient, knowledgeRepository: unresolvedRepository });
+    expect(result.drugDrug).toMatchObject({ severity: "NOT_EVALUATED", complete: false, dataStatus: "INCOMPLETE_EVIDENCE" });
   });
 
   it("returns a DrugCentral HIGH/MODERATE/LOW assessment and no percentage", async () => {
@@ -40,13 +65,14 @@ describe("dataset-backed clinical service contracts", () => {
     expect(result.drugDisease.assessment).toBe("HIGH");
   });
 
-  it("keeps unresolved free-text conditions as no-match without claiming a relationship", async () => {
+  it("keeps unresolved free-text conditions as incomplete evidence without claiming a relationship", async () => {
     const repository = {
       ...knowledgeRepository,
       findDrugDiseaseAssessments: async () => ({ findings: [], resolutions: [{ enteredCondition: "Unmapped local wording", status: "UNRESOLVED" }] }),
     };
     const result = await clinicalSafetyAssessment({ consultation: { ...consultation, candidateGeneric: "No relation candidate" }, patient: { ...patient, medications: [] }, knowledgeRepository: repository });
-    expect(result.drugDisease.assessment).toBe("NOT_EVALUATED");
+    expect(result.drugDisease).toMatchObject({ assessment: "NOT_EVALUATED", complete: false, dataStatus: "INCOMPLETE_EVIDENCE" });
+    expect(result.overall).toMatchObject({ assessment: "NOT_EVALUATED", dataStatus: "INCOMPLETE_EVIDENCE" });
     expect(result.drugDisease.explanations[0]).toContain("could not be deterministically resolved");
   });
 
@@ -56,13 +82,13 @@ describe("dataset-backed clinical service contracts", () => {
     expect(withAllergy).not.toHaveProperty("drugAllergy");
     expect(withAllergy.drugDrug).toEqual(withoutAllergy.drugDrug);
     expect(withAllergy.drugDisease).toEqual(withoutAllergy.drugDisease);
-    expect(await recommendations({ consultation, patient: { ...patient, allergies: [{ display: "Penicillin", severity: "severe" }] }, knowledgeRepository })).toEqual(await recommendations({ consultation, patient, knowledgeRepository }));
+    expect(await recommendations({ consultation, patient: { ...patient, allergies: [{ display: "Penicillin", severity: "severe" }] }, knowledgeRepository, requestId: "test", provider })).toEqual(await recommendations({ consultation, patient, knowledgeRepository, requestId: "test", provider }));
   });
 
-  it("returns DrugCentral indication candidates without a synthetic safety score", async () => {
-    const result = await recommendations({ consultation, patient, knowledgeRepository });
-    expect(result).toEqual([expect.objectContaining({ drug: "Paracetamol", source: "DrugCentral", rank: 1 })]);
-    expect(result[0]).not.toHaveProperty("riskPct");
+  it("returns same-indication candidates with an explicit safety-aware score", async () => {
+    const result = await recommendations({ consultation, patient, knowledgeRepository, requestId: "test", provider });
+    expect(result).toEqual([expect.objectContaining({ drug: "Paracetamol", source: "DrugCentral", status: "RECOMMENDED", drugDrug: expect.objectContaining({ severity: "NO_DOCUMENTED_INTERACTION", complete: true }) })]);
+    expect(result[0]).toHaveProperty("safetyScore");
     expect(recommendationRankingConfig.candidateSource).toContain("DrugCentral");
   });
 

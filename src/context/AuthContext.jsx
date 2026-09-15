@@ -5,10 +5,12 @@ const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
   const [doctor, setDoctor] = useState(null)
+  const [authLoading, setAuthLoading] = useState(true)
   useEffect(() => {
     const clearSession = () => { setAccessToken(null); setDoctor(null); };
     window.addEventListener("vitanexus-auth-invalid", clearSession);
-    if (getAccessToken()) api('/auth/me').then(setDoctor).catch(clearSession);
+    if (getAccessToken()) api('/auth/me').then(setDoctor).catch(clearSession).finally(() => setAuthLoading(false));
+    else setAuthLoading(false);
     return () => window.removeEventListener("vitanexus-auth-invalid", clearSession);
   }, [])
 
@@ -20,9 +22,13 @@ export function AuthProvider({ children }) {
     const result = await apiJson('/auth/login', 'POST', { email, password })
     setAccessToken(result.accessToken); setDoctor(result.clinician); return result.clinician
   }
+  const updateProfile = async ({ email, phone }) => {
+    const clinician = await apiJson('/auth/me', 'PATCH', { email, phone: phone || null })
+    setDoctor(clinician); return clinician
+  }
   const logout = async () => { try { await apiJson('/auth/logout', 'POST', {}) } finally { setAccessToken(null); setDoctor(null) } }
 
-  return <AuthContext.Provider value={{ doctor, register, login, logout }}>{children}</AuthContext.Provider>
+  return <AuthContext.Provider value={{ doctor, authLoading, register, login, updateProfile, logout }}>{children}</AuthContext.Provider>
 }
 
 export const useAuth = () => {

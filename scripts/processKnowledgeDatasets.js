@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
+import { normalizeDdinterDrugName } from "../server/repositories/clinicalKnowledgeRepository.js";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const rawRoot = path.join(projectRoot, "data", "raw");
@@ -35,7 +36,7 @@ const processDdinter = () => {
       const [ddinterIdA, drugA, ddinterIdB, drugB, rawSeverity] = csvFields(line);
       const displaySeverity = String(rawSeverity || "").trim().toUpperCase();
       if (!drugA || !drugB || !["MAJOR", "MODERATE", "MINOR"].includes(displaySeverity)) continue;
-      const pair = [{ id: ddinterIdA, name: drugA, normalized: normalize(drugA) }, { id: ddinterIdB, name: drugB, normalized: normalize(drugB) }].sort((a, b) => a.normalized.localeCompare(b.normalized));
+      const pair = [{ id: ddinterIdA, name: drugA, normalized: normalizeDdinterDrugName(drugA) }, { id: ddinterIdB, name: drugB, normalized: normalizeDdinterDrugName(drugB) }].sort((a, b) => a.normalized.localeCompare(b.normalized));
       const record = { drugA: pair[0].name, normalizedDrugA: pair[0].normalized, ddinterIdA: pair[0].id || null, drugB: pair[1].name, normalizedDrugB: pair[1].normalized, ddinterIdB: pair[1].id || null, rawSeverity: String(rawSeverity).trim(), displaySeverity, source: "DDInter 2.0", datasetVersion: `DDInter 2.0 import ${version}` };
       const key = `${record.normalizedDrugA}|${record.normalizedDrugB}|${record.displaySeverity}`;
       if (!seen.has(key)) { seen.add(key); records.push(record); }

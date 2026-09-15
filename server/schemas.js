@@ -18,6 +18,11 @@ export const loginSchema = z.object({
   password: z.string().min(1).max(128),
 });
 
+export const clinicianProfileUpdateSchema = z.object({
+  email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()),
+  phone: z.string().trim().regex(/^\d{7,15}$/, "Phone number must contain 7 to 15 digits.").nullable(),
+}).strict();
+
 export const medicationSchema = z.object({
   brand: optionalText(),
   genericName: optionalText(),
@@ -45,12 +50,23 @@ export const profileSchema = z.object({ items: z.array(z.unknown()).max(100), ex
 
 export const consultationSchema = z.object({
   indication: text(),
+  indicationId: z.string().uuid(),
+  indicationSource: z.literal("DrugCentral"),
+  indicationDatasetVersion: text(120),
   candidateBrand: optionalText(),
   candidateGeneric: optionalText(),
   dosage: text(100),
   frequency: text(100).regex(/^(1d|2d|3d|1w|2w|3w)$/i, "Frequency must be one of 1d, 2d, 3d, 1w, 2w, or 3w."),
   route: optionalText(100),
 }).refine((value) => value.candidateBrand || value.candidateGeneric, "A brand or generic prescribed drug name is required.");
+
+export const consultationIndicationUpdateSchema = z.object({
+  indication: text(),
+  indicationId: z.string().uuid(),
+  indicationSource: z.literal("DrugCentral"),
+  indicationDatasetVersion: text(120),
+  expectedVersion: z.coerce.number().int().positive().optional(),
+});
 
 export const noteSchema = z.object({ text: text(10_000) });
 export const followUpSchema = z.object({ adverseEvent: text(), eventCode: optionalText(100), severity: text(50), durationDays: z.coerce.number().int().min(0).max(3650).optional().nullable(), notes: optionalText(10_000) });

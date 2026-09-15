@@ -21,6 +21,7 @@ import {
 
 export function resolveEntryStep(visit, navigationState) {
   if (navigationState?.entry === "results") return "results";
+  if (navigationState?.entry === "recommendations") return "recommendations";
   if (navigationState?.entry === "followup" && visit?.status === "in-progress")
     return "followup";
   if (visit?.status === "completed") return "results";
@@ -45,30 +46,46 @@ const normalizeSeverity = (severity) => severity || "NOT_EVALUATED";
 const formatDuration = (duration) =>
   /^\d+$/.test(String(duration)) ? `${duration} days` : duration;
 const datasetResultLabel = (value, dataStatus) =>
-  dataStatus === "NO_DATASET_MATCH" || value === "NOT_EVALUATED"
-    ? "NO INTERACTION DETECTED"
+  dataStatus === "INCOMPLETE_EVIDENCE"
+    ? "REQUIRES CLINICAL REVIEW"
+    : dataStatus === "NO_DOCUMENTED_INTERACTION" || value === "NO_DOCUMENTED_INTERACTION"
+    ? "NO DOCUMENTED INTERACTION"
+    : dataStatus === "NO_DOCUMENTED_RELATIONSHIP" || value === "NO_DOCUMENTED_RELATIONSHIP" || dataStatus === "NO_DATASET_MATCH"
+    ? "NO DOCUMENTED RELATIONSHIP"
+    : value === "NOT_EVALUATED"
+    ? "REQUIRES CLINICAL REVIEW"
     : value;
 
 function AssessmentBadge({ severity }) {
-  if (severity === "NO INTERACTION DETECTED") {
+  const label = {
+    REQUIRES_REVIEW: "REQUIRES CLINICAL REVIEW",
+    ELIGIBLE: "SAFETY CHECKS PASSED",
+    INPUT_CORRECTION_NEEDED: "INPUT CORRECTION NEEDED",
+    RANKING_UNAVAILABLE: "RANKING UNAVAILABLE",
+    DDINTER_IDENTIFIER_UNRESOLVED: "DRUG NOT COVERED BY DDINTER",
+    DDINTER_LOOKUP_FAILED: "DDINTER LOOKUP FAILED",
+    NOT_RECOMMENDED: "NOT RECOMMENDED",
+    NOT_EVALUATED: "NOT EVALUATED",
+  }[severity] || severity;
+  if (label === "NO INTERACTION DETECTED" || label === "NO DOCUMENTED INTERACTION" || label === "NO DOCUMENTED RELATIONSHIP") {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-800 bg-emerald-900 px-2.5 py-1 text-xs font-bold tracking-wide text-emerald-50 dark:border-emerald-400 dark:bg-emerald-950 dark:text-emerald-100">
         <CheckCircle2 size={13} aria-hidden="true" />
-        {severity}
+        {label}
       </span>
     );
   }
   const tone =
-    severity === "Contraindicated" || severity === "High" || severity === "HIGH" || severity === "MAJOR"
+    label === "Contraindicated" || label === "High" || label === "HIGH" || label === "MAJOR" || label === "NOT RECOMMENDED"
       ? "bg-danger"
-      : severity === "Moderate" || severity === "MODERATE"
+      : label === "Moderate" || label === "MODERATE" || label === "REQUIRES CLINICAL REVIEW" || label === "NOT EVALUATED" || label === "INPUT CORRECTION NEEDED" || label === "RANKING UNAVAILABLE" || label === "DRUG NOT COVERED BY DDINTER" || label === "DDINTER LOOKUP FAILED"
         ? "bg-warning text-slate-900"
         : "bg-success";
   return (
     <span
       className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold text-white ${tone}`}
     >
-      {severity}
+      {label}
     </span>
   );
 }
@@ -82,6 +99,34 @@ function Metric({ label, children, className = "" }) {
       <div className="mt-1 text-sm font-semibold">{children}</div>
     </div>
   );
+}
+
+const probability = (value) => Number.isFinite(value) ? `${Math.round(value * 100)}%` : "Unavailable";
+const componentEvidenceLabel = (value, complete, noMatchLabel) => value === "NO_DOCUMENTED_INTERACTION" ? "NO DOCUMENTED INTERACTION" : value === "NOT_EVALUATED" ? (complete ? noMatchLabel : "REQUIRES CLINICAL REVIEW") : value;
+const ddiEvidenceLabel = (drugDrug) => {
+  if (drugDrug?.severity === "NO_DOCUMENTED_INTERACTION") return "NO DOCUMENTED INTERACTION";
+  if (drugDrug?.complete) return drugDrug.severity;
+  return drugDrug?.evaluations?.some((evaluation) => evaluation.status === "LOOKUP_FAILED")
+    ? "DDINTER_LOOKUP_FAILED"
+    : "DDINTER_IDENTIFIER_UNRESOLVED";
+};
+
+const missingLightgbmInputs = (coverage = {}) => [
+  ...(!coverage.sexKnown ? ["patient sex"] : []),
+  ...(!coverage.indicationKnown ? ["consultation indication"] : []),
+  ...(!coverage.candidateKnown ? ["candidate medicine"] : []),
+  ...(coverage.unknownCurrentMedications || []).map((medicine) => `current medicine “${medicine}”`),
+];
+
+function RecommendationMlDetails({ recommendation }) {
+  const ml = recommendation.ml;
+  const available = ["ok", "DEGRADED_COVERAGE"].includes(ml?.status) && ml?.overall;
+  if (!available) {
+    const gated = recommendation.gate?.status && recommendation.gate.status !== "ELIGIBLE";
+    const missing = missingLightgbmInputs(ml?.inputCoverage);
+    return <div className="mt-3 rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs"><strong>{gated ? "LightGBM ranking was not run." : ml?.status === "OUT_OF_VOCABULARY" ? "LightGBM input correction needed." : "LightGBM ranking unavailable."}</strong> {gated ? "The dataset safety gate requires clinical review before ranking; no risk score was inferred." : ml?.status === "OUT_OF_VOCABULARY" ? `${missing.length ? `Correct the ${missing.join(", ")}. ` : "Correct the unsupported consultation input. "}The DDInter and DrugCentral checks passed, so this is not a DDInter clinical-review result.` : "The safety checks passed, but the ranking model did not return a usable score."}</div>;
+  }
+  return <div className="mt-3 border-t border-border pt-3 dark:border-slate-600">{ml.status === "DEGRADED_COVERAGE" && <div className="mb-3 rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs"><strong>Degraded ML coverage:</strong> Some inputs were outside the trained vocabulary, so the candidate is not automatically scored.</div>}<div className="grid grid-cols-2 gap-x-5 gap-y-4"><Metric label="Overall adverse risk">{probability(ml.overall.riskProbability)}</Metric><Metric label="90% bootstrap range">{probability(ml.overall.uncertainty.lower)} – {probability(ml.overall.uncertainty.upper)}</Metric><Metric label="Adjusted adverse risk">{probability(ml.overall.adjustedRisk)}</Metric><Metric label="Conformal reliability">{ml.overall.conformal.reliability?.replaceAll("_", " ")}</Metric></div><p className="mt-3 text-xs text-slate-500">{recommendation.ranking?.explanation}</p></div>;
 }
 
 function SideEffectField({ value, onChange }) {
@@ -114,6 +159,7 @@ function Results({
   onStageChange,
   onSaveNotes,
   onAddPatient,
+  onOpenAdr,
 }) {
   const [notes, setNotes] = useState(visit.doctorNotes || "");
   const safety = visit.safetyResult;
@@ -152,7 +198,7 @@ function Results({
                 </Metric>
                 <Metric label="Source">{risk?.source || "DDInter 2.0"}</Metric>
               </div>
-              <p className="mt-3 text-xs text-slate-500">{risk?.dataStatus === "NO_DATASET_MATCH" ? "Evaluation completed: no DDInter 2.0 record exists for the compared dataset terms shown under Why?." : "Evaluation completed with matching DDInter 2.0 source evidence."}</p>
+              <p className="mt-3 text-xs text-slate-500">{risk?.dataStatus === "NO_DOCUMENTED_INTERACTION" ? "Both drug identifiers resolved and the DDInter 2.0 lookup completed; no interaction record exists for the compared pair." : risk?.dataStatus === "INCOMPLETE_EVIDENCE" ? "One or more drug identifiers could not be resolved, or the lookup failed; clinical review is required." : "Evaluation completed with matching DDInter 2.0 source evidence."}</p>
               <ExplainToggle reasons={risk?.explanations || getDDIPredictionReasons(severity)} />
             </section>
 
@@ -179,7 +225,9 @@ function Results({
 
         <ResultCard title="Dataset Evaluation Status">
           <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">
-            DDInter 2.0 and DrugCentral checks are complete. “No match found” is a completed source check, not a missing dataset import.
+            {risk?.complete && safety?.drugDisease?.complete
+              ? "DDInter 2.0 and DrugCentral checks are complete. A no-documented-relationship result is a completed source check, not a failed lookup."
+              : "One or more identifiers could not be resolved or a source lookup failed. Open Why? to see the exact unresolved input."}
           </p>
         </ResultCard>
       </div>
@@ -187,10 +235,10 @@ function Results({
           <div className="flex flex-wrap justify-end gap-3">
             <button
               type="button"
-              onClick={() => onStageChange("recommendations")}
+              onClick={onOpenAdr}
               className="btn-primary"
             >
-              View Dataset-Evaluated Alternatives
+              Adverse Risk Assessment
               <ChevronRight size={16} />
             </button>
           </div>
@@ -208,15 +256,19 @@ function Results({
                 key={`${recommendation.drug}-${index}`}
               >
                 <strong>
-                  {index + 1}. {recommendation.drug}
+                  {recommendation.rank ? `${recommendation.rank}. ` : "Flagged · "}{recommendation.drug}
                 </strong>
                 <div className="mt-3 grid grid-cols-2 gap-x-5 gap-y-4">
-                  <Metric label="Assessment"><AssessmentBadge severity={datasetResultLabel(recommendation.assessment, recommendation.dataStatus)} /></Metric>
+                  <Metric label="Recommendation status"><AssessmentBadge severity={recommendation.assessment} /></Metric>
                   <Metric label="Source">{recommendation.source || "DrugCentral"}</Metric>
                   <Metric label="Indication relationship" className="col-span-2">{recommendation.indicationRelationship || "Candidate lookup pending"}</Metric>
-                  <Metric label="DDInter check"><AssessmentBadge severity={datasetResultLabel(recommendation.drugDrug?.severity, recommendation.dataStatus)} /></Metric>
-                  <Metric label="DrugCentral condition check"><AssessmentBadge severity={datasetResultLabel(recommendation.drugDisease?.assessment, recommendation.dataStatus)} /></Metric>
+                  <Metric label="Drug–Drug Interaction Analysis"><AssessmentBadge severity={ddiEvidenceLabel(recommendation.drugDrug)} /></Metric>
+                  <Metric label="Drug–Disease Interaction Analysis"><AssessmentBadge severity={componentEvidenceLabel(recommendation.drugDisease?.assessment, recommendation.drugDisease?.complete, "NO DOCUMENTED RELATIONSHIP")} /></Metric>
+                  <Metric label="Safety gate"><AssessmentBadge severity={recommendation.gate?.status || recommendation.status || recommendation.assessment} /></Metric>
+                  <Metric label="Evidence completeness">{recommendation.knownSafetyEvidence?.label || "Requires Clinical Review"}</Metric>
                 </div>
+                {recommendation.status === "RECOMMENDED" && <div className="mt-3 grid grid-cols-2 gap-x-5 gap-y-4 rounded-lg bg-primary/5 p-3"><Metric label="Final safety-aware score">{Number(recommendation.safetyScore).toFixed(1)} / 100</Metric><Metric label="Final risk score">{probability(recommendation.finalRiskScore)}</Metric><Metric label="Adjusted adverse-risk weight">{Math.round(recommendation.components.lightgbmWeight * 100)}%</Metric><Metric label="DDI / drug-disease weights">{Math.round(recommendation.components.ddiWeight * 100)}% / {Math.round(recommendation.components.drugDiseaseWeight * 100)}%</Metric></div>}
+                <RecommendationMlDetails recommendation={recommendation} />
               </div>
             );
           }) : <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-600 dark:bg-slate-700/50 dark:text-slate-200">Evaluation completed: DrugCentral has no indication candidate for this exact recorded indication. Choose a dataset indication from the lookup to obtain candidate results.</p>}
@@ -531,15 +583,19 @@ function UpdatedRecommendations({ visit, historical, onBack }) {
                   key={`${recommendation.drug}-${index}`}
                 >
                   <strong>
-                    {index + 1}. {recommendation.drug}
+                    {recommendation.rank ? `${recommendation.rank}. ` : "Flagged · "}{recommendation.drug}
                   </strong>
                   <div className="mt-3 grid grid-cols-2 gap-x-5 gap-y-4">
-                    <Metric label="Assessment">
-                      <AssessmentBadge severity={datasetResultLabel(recommendation.assessment, recommendation.dataStatus)} />
+                    <Metric label="Recommendation status">
+                      <AssessmentBadge severity={recommendation.assessment} />
                     </Metric>
                     <Metric label="Source">{recommendation.source || "DrugCentral"}</Metric>
                     <Metric label="Indication relationship" className="col-span-2">{recommendation.indicationRelationship || "Candidate lookup pending"}</Metric>
+                    <Metric label="Safety gate"><AssessmentBadge severity={recommendation.gate?.status || recommendation.status || recommendation.assessment} /></Metric>
+                    <Metric label="Evidence completeness">{recommendation.knownSafetyEvidence?.label || "Requires Clinical Review"}</Metric>
                   </div>
+                  {recommendation.status === "RECOMMENDED" && <div className="mt-3 grid grid-cols-2 gap-x-5 gap-y-4 rounded-lg bg-primary/5 p-3"><Metric label="Final safety-aware score">{Number(recommendation.safetyScore).toFixed(1)} / 100</Metric><Metric label="Final risk score">{probability(recommendation.finalRiskScore)}</Metric><Metric label="Adjusted adverse-risk weight">{Math.round(recommendation.components.lightgbmWeight * 100)}%</Metric><Metric label="DDI / drug-disease weights">{Math.round(recommendation.components.ddiWeight * 100)}% / {Math.round(recommendation.components.drugDiseaseWeight * 100)}%</Metric></div>}
+                  <RecommendationMlDetails recommendation={recommendation} />
                 </div>
               );
             })
@@ -564,6 +620,8 @@ function UpdatedRecommendations({ visit, historical, onBack }) {
 function WizardSteps({ activeStep, visitedSteps, onStepChange }) {
   const steps = [
     ["results", "Clinical Safety"],
+    ["adr", "Adverse Risk Assessment"],
+    ["events", "Event Profile"],
     ["recommendations", "Recommendations"],
     ["followup", "Follow-up"],
     ["updated", "Follow-up Recommendation"],
@@ -607,6 +665,7 @@ export default function PatientRecord() {
     submitFeedback,
     saveFollowUpDraft,
     saveVisitNotes,
+    generateClinicalSafety,
   } = usePatient();
   const patient = patients.find((item) => item.id === patientId);
   const activeVisit = useMemo(
@@ -625,9 +684,12 @@ export default function PatientRecord() {
   const [resolvedVisitId, setResolvedVisitId] = useState(
     activeVisit?.id || null,
   );
+  const [safetyRequestVisitId, setSafetyRequestVisitId] = useState(null);
   const [visitedSteps, setVisitedSteps] = useState(() => ({
     results: true,
-    recommendations: activeVisit?.status === "completed",
+    adr: true,
+    events: true,
+    recommendations: Boolean(activeVisit?.recommendations?.length) || activeVisit?.status === "completed" || resolveEntryStep(activeVisit, stateForVisit) === "recommendations",
     followup:
       activeVisit?.status === "completed" ||
       resolveEntryStep(activeVisit, stateForVisit) === "followup",
@@ -654,7 +716,9 @@ export default function PatientRecord() {
       setStep(resolveEntryStep(activeVisit, stateForVisit));
       setVisitedSteps({
         results: true,
-        recommendations: activeVisit.status === "completed",
+        adr: true,
+        events: true,
+        recommendations: Boolean(activeVisit.recommendations?.length) || activeVisit.status === "completed" || resolveEntryStep(activeVisit, stateForVisit) === "recommendations",
         followup:
           activeVisit.status === "completed" ||
           resolveEntryStep(activeVisit, stateForVisit) === "followup",
@@ -663,6 +727,15 @@ export default function PatientRecord() {
       setResolvedVisitId(activeVisit.id);
     }
   }, [activeVisit, resolvedVisitId, stateForVisit]);
+
+  useEffect(() => {
+    if (!activeVisit || activeVisit.safetyResult || safetyRequestVisitId === activeVisit.id) return;
+    setSafetyRequestVisitId(activeVisit.id);
+    generateClinicalSafety(activeVisit.id).catch((error) => {
+      console.error("Current clinical-safety assessment could not be generated:", error);
+      setSafetyRequestVisitId(null);
+    });
+  }, [activeVisit, generateClinicalSafety, safetyRequestVisitId]);
 
   if (!patient || !activeVisit)
     return <div className="surface p-6">Patient record not found.</div>;
@@ -676,6 +749,14 @@ export default function PatientRecord() {
     submitFeedback(patient.id, activeVisit.id, feedback);
   const startNewPatient = () => navigate("/patients/new");
   const goToVisitedStep = (target) => {
+    if (target === "adr") {
+      navigate(`/patients/${patient.id}/consultations/${activeVisit.id}/adr`);
+      return;
+    }
+    if (target === "events") {
+      navigate(`/patients/${patient.id}/consultations/${activeVisit.id}/adverse-event-risks`);
+      return;
+    }
     if (visitedSteps[target]) setStep(target);
   };
   const advanceToStep = (target) => {
@@ -695,6 +776,7 @@ export default function PatientRecord() {
           saveVisitNotes(patient.id, activeVisit.id, notes)
         }
         onAddPatient={startNewPatient}
+        onOpenAdr={() => navigate(`/patients/${patient.id}/consultations/${activeVisit.id}/adr`)}
       />
     ) : step === "followup" ? (
       <FollowUp

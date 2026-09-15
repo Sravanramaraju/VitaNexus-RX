@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { activeSafetyResult, mapAllergyInput, patientResponse } from "./repository.js";
+import { activeSafetyResult, consultationResponse, mapAllergyInput, patientResponse } from "./repository.js";
+import { CLINICAL_ENGINE_VERSION } from "./services/clinicalEngineVersion.js";
+import { rankingConfig } from "./services/rankingConfig.js";
 
 describe("patient allergy profile contract", () => {
   it("preserves clinician-recorded allergy display and severity in the patient response", () => {
@@ -28,5 +30,31 @@ describe("patient allergy profile contract", () => {
     expect(active).not.toHaveProperty("drugAllergy");
     expect(active.legacyFieldsOmitted).toEqual(["drugAllergy"]);
     expect(legacy.drugAllergy.legacyOnly).toBe(true);
+  });
+
+  it("does not expose a stale recommendation contract after the safety order changes", () => {
+    const base = {
+      id: "consultation-1",
+      patientId: "patient-1",
+      indication: "Pain",
+      candidateGeneric: "Ibuprofen",
+      status: "IN_PROGRESS",
+      version: 1,
+      createdAt: new Date("2026-01-01"),
+      updatedAt: new Date("2026-01-01"),
+      analyses: [],
+      adrPredictions: [],
+      hgnnEventPredictions: [],
+      notes: [],
+      followUps: [],
+    };
+    expect(consultationResponse({
+      ...base,
+      recommendations: [{ engineVersion: `${CLINICAL_ENGINE_VERSION}|old-ranking|hash`, recommendations: [{ drug: "stale" }] }],
+    }).recommendations).toBeNull();
+    expect(consultationResponse({
+      ...base,
+      recommendations: [{ engineVersion: `${CLINICAL_ENGINE_VERSION}|${rankingConfig.configId}|hash`, recommendations: [{ drug: "current" }] }],
+    }).recommendations).toEqual([{ drug: "current" }]);
   });
 });

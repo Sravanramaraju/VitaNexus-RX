@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createClinicalKnowledgeRepository, ddinterSearchTerms } from "./clinicalKnowledgeRepository.js";
+import { createClinicalKnowledgeRepository, ddinterSearchTerms, normalizeDdinterDrugName } from "./clinicalKnowledgeRepository.js";
 
 describe("DDInter terminology alignment", () => {
   it("aligns Crocin's paracetamol ingredient with DDInter's acetaminophen term", () => {
@@ -7,13 +7,33 @@ describe("DDInter terminology alignment", () => {
     expect(ddinterSearchTerms("Paracetamol/Acetaminophen + Tramadol")).toEqual(["acetaminophen", "tramadol"]);
   });
 
+  it("removes only redundant DDInter parenthetical qualifiers", () => {
+    expect(normalizeDdinterDrugName("Insulin aspart (aspart)")).toBe("insulin aspart");
+    expect(normalizeDdinterDrugName("Insulin aspart (aspart protamine)")).toBe("insulin aspart aspart protamine");
+    expect(normalizeDdinterDrugName("Hydrocortisone (topical)")).toBe("hydrocortisone topical");
+  });
+
   it("finds the known DDInter acetaminophen-warfarin interaction for paracetamol", async () => {
-    const findMany = async ({ where }) => {
-      expect(where.OR).toContainEqual({ normalizedDrugA: "acetaminophen", normalizedDrugB: "warfarin" });
-      return [{ drugA: "Acetaminophen", drugB: "Warfarin", rawSeverity: "Moderate", displaySeverity: "MODERATE", source: "DDInter 2.0", datasetVersion: "DDInter 2.0 import 2026-08-11", ddinterIdA: "DDInter14", ddinterIdB: "DDInter1951", importedAt: new Date() }];
-    };
+    const findMany = async () => [{ normalizedDrugA: "acetaminophen", normalizedDrugB: "warfarin", drugA: "Acetaminophen", drugB: "Warfarin", rawSeverity: "Moderate", displaySeverity: "MODERATE", source: "DDInter 2.0", datasetVersion: "DDInter 2.0 import 2026-08-11", ddinterIdA: "DDInter14", ddinterIdB: "DDInter1951", importedAt: new Date() }];
     const repository = createClinicalKnowledgeRepository({ drugInteractionKnowledge: { findMany } });
     await expect(repository.findPairwiseDrugInteraction("Paracetamol", "Warfarin")).resolves.toMatchObject({ drugA: "Acetaminophen", drugB: "Warfarin", displaySeverity: "MODERATE" });
+  });
+
+  it("distinguishes a successful empty pair lookup from unresolved input", async () => {
+    const records = [
+      { normalizedDrugA: "acetaminophen", normalizedDrugB: "warfarin", drugA: "Acetaminophen", drugB: "Warfarin", ddinterIdA: "DDInter14", ddinterIdB: "DDInter1951", displaySeverity: "MODERATE", source: "DDInter 2.0" },
+      { normalizedDrugA: "epinephrine", normalizedDrugB: "insulin aspart aspart", drugA: "Epinephrine", drugB: "Insulin aspart (aspart)", ddinterIdA: "DDInter652", ddinterIdB: "DDInter929", displaySeverity: "MODERATE", source: "DDInter 2.0" },
+    ];
+    const client = { drugInteractionKnowledge: { findMany: async ({ where }) => where.OR.some((item) => item.ddinterIdA || item.ddinterIdB) ? [] : records } };
+    const repository = createClinicalKnowledgeRepository(client);
+
+    await expect(repository.evaluateDdiPair("Insulin aspart", "Paracetamol")).resolves.toMatchObject({ status: "NO_DOCUMENTED_INTERACTION", lookupCompleted: true });
+    await expect(repository.evaluateDdiPair("Unknown candidate", "Paracetamol")).resolves.toMatchObject({ status: "UNRESOLVED", lookupCompleted: false });
+  });
+
+  it("returns a protected failure state when the DDInter lookup throws", async () => {
+    const repository = createClinicalKnowledgeRepository({ drugInteractionKnowledge: { findMany: async () => { throw new Error("database offline"); } } });
+    await expect(repository.evaluateDdiPair("Ibuprofen", "Warfarin")).resolves.toMatchObject({ status: "LOOKUP_FAILED", lookupCompleted: false });
   });
 });
 
