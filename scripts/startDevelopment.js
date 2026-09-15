@@ -12,6 +12,7 @@ const viteEntryPoint = path.join(
   "bin",
   "vite.js",
 );
+const pythonEntryPoint = path.join(projectRoot, "ml", ".venv", process.platform === "win32" ? "Scripts" : "bin", process.platform === "win32" ? "python.exe" : "python");
 
 const responseContains = async (url, expectedText) => {
   try {
@@ -69,6 +70,7 @@ const startServices = () => {
     // Run Vite through Node instead of vite.cmd. Windows cannot spawn a .cmd
     // shim without a shell, which previously left the API process orphaned.
     { name: "web app", command: process.execPath, args: [viteEntryPoint] },
+    { name: "ML service", command: pythonEntryPoint, args: ["-m", "uvicorn", "vitanexus_ml.api.app:app", "--app-dir", "ml/src", "--host", "127.0.0.1", "--port", "8000"] },
   ];
 
   const services = [];
@@ -118,7 +120,7 @@ const startServices = () => {
   process.once("SIGTERM", () => stopServices());
 };
 
-const [existingWebApp, existingApi, webPortInUse, apiPortInUse] =
+const [existingWebApp, existingApi, existingMl, webPortInUse, apiPortInUse, mlPortInUse] =
   await Promise.all([
     responseContains(
       "http://localhost:5173/register",
@@ -128,16 +130,19 @@ const [existingWebApp, existingApi, webPortInUse, apiPortInUse] =
       "http://localhost:4000/api/v1/health",
       '"service":"vitanexus-rx-api"',
     ),
+    responseContains("http://127.0.0.1:8000/health", '"activeModel":"LightGBM"'),
     portIsListening(5173),
     portIsListening(4000),
+    portIsListening(8000),
   ]);
 
 const conflicts = [
   ...(webPortInUse ? ["5173 (web app)"] : []),
   ...(apiPortInUse ? ["4000 (API)"] : []),
+  ...(mlPortInUse ? ["8000 (ML service)"] : []),
 ];
 
-if (existingWebApp && existingApi) {
+if (existingWebApp && existingApi && existingMl) {
   console.log("VitaNexus-RX is already running at http://localhost:5173.");
 } else if (conflicts.length) {
   console.error(

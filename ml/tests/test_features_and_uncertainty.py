@@ -13,9 +13,9 @@ def test_feature_builder_train_serving_parity_and_unknowns():
     batch = builder.transform(rows)
     one, coverage = builder.transform_one({"age": 58, "sex": "M", "candidateDrug": "WARFARIN", "indication": "THROMBOSIS", "currentMedications": ["ASPIRIN"]})
     assert (batch != one).nnz == 0
-    assert coverage.candidateKnown and coverage.indicationKnown
+    assert coverage.sexKnown and coverage.candidateKnown and coverage.indicationKnown
     _, unknown = builder.transform_one({"age": None, "sex": "X", "candidateDrug": "NEW DRUG", "indication": "NEW USE", "currentMedications": ["UNKNOWN MED"]})
-    assert not unknown.candidateKnown and not unknown.indicationKnown
+    assert not unknown.sexKnown and not unknown.candidateKnown and not unknown.indicationKnown
     assert unknown.unknownCurrentMedications == ["UNKNOWN MED"]
 
 

@@ -11,7 +11,7 @@ import numpy as np
 from vitanexus_ml.config import ARTIFACT_ROOT, REPORT_ROOT
 from vitanexus_ml.conformal.split import prediction_set
 from vitanexus_ml.models.metrics import bootstrap_interval
-from vitanexus_ml.normalization import normalize_drug, normalize_indication
+from vitanexus_ml.normalization import normalize_drug, normalize_indication, normalize_sex
 
 
 class ArtifactsUnavailable(RuntimeError):
@@ -94,19 +94,69 @@ class LightGBMPredictor:
         if not expected or expected != model_features:
             raise ArtifactsUnavailable("LightGBM artifact feature schema does not match model feature ordering.")
 
-    def predict(self, request: dict) -> dict:
+    def inspect_coverage(self, request: dict) -> dict:
         candidate = normalize_drug(request["candidateDrug"]["canonicalName"])
         indication = normalize_indication(request["indication"]["name"])
+        sex = normalize_sex(request["patient"].get("sex"))
         current = [normalize_drug(value) for value in request["patient"].get("currentMedications", [])]
         matrix, coverage = self.serious["featureBuilder"].transform_one({
             "age": request["patient"].get("age"),
-            "sex": request["patient"].get("sex"),
+            "sex": sex,
             "candidateDrug": candidate,
             "indication": indication,
             "currentMedications": current,
         })
+        full = coverage.sexKnown and coverage.candidateKnown and coverage.indicationKnown and not coverage.unknownCurrentMedications
+        return {
+            "status": "FULL" if full else "OUT_OF_VOCABULARY",
+            "inputCoverage": coverage.__dict__,
+            "normalizedInput": {
+                "sex": sex,
+                "candidateDrug": candidate,
+                "indication": indication,
+                "currentMedications": current,
+            },
+            "matrix": matrix,
+        }
+
+    def inspect_terms(self, request: dict) -> dict:
+        builder = self.serious["featureBuilder"]
+        return {
+            "status": "ok",
+            "modelVersion": self.serious["versions"]["lightgbm"],
+            "candidates": [
+                {"input": value, "normalized": normalize_drug(value), "supported": normalize_drug(value) in builder.candidate_vocabulary}
+                for value in request.get("candidates", [])
+            ],
+            "indications": [
+                {"input": value, "normalized": normalize_indication(value), "supported": normalize_indication(value) in builder.indication_vocabulary}
+                for value in request.get("indications", [])
+            ],
+            "medications": [
+                {"input": value, "normalized": normalize_drug(value), "supported": normalize_drug(value) in builder.medication_vocabulary}
+                for value in request.get("medications", [])
+            ],
+        }
+
+    def predict(self, request: dict) -> dict:
+        inspected = self.inspect_coverage(request)
+        matrix = inspected.pop("matrix")
+        coverage = inspected["inputCoverage"]
         if int(matrix.shape[1]) != len(self.serious["featureBuilder"].feature_names):
             raise ArtifactsUnavailable("Generated LightGBM feature schema does not match the persisted schema.")
+        if inspected["status"] != "FULL":
+            return {
+                "status": "OUT_OF_VOCABULARY",
+                "artifactMode": "FULL",
+                "model": "LightGBM",
+                "modelVersion": self.serious["versions"]["lightgbm"],
+                "versions": self.serious["versions"],
+                "inputCoverage": coverage,
+                "normalizedInput": inspected["normalizedInput"],
+                "dataWindow": self.serious["dataWindow"],
+                "generatedAt": datetime.now(timezone.utc).isoformat(),
+                "message": "LightGBM did not score this request because one or more inputs are outside the protected training vocabulary. Correct the listed input or use a validated model that covers it.",
+            }
         raw_probability = _lightgbm_probability(self.serious["model"], matrix)
         probability = float(self.serious["calibrator"].predict([raw_probability])[0])
         replica_probabilities = [
@@ -143,7 +193,7 @@ class LightGBMPredictor:
             },
         }
         return {
-            "status": "ok" if coverage.candidateKnown and coverage.indicationKnown and not coverage.unknownCurrentMedications else "DEGRADED_COVERAGE",
+            "status": "ok",
             "artifactMode": "FULL",
             "model": "LightGBM",
             "modelVersion": versions["lightgbm"],
@@ -155,7 +205,7 @@ class LightGBMPredictor:
                 "conformal": versions["conformal"],
             },
             "overall": overall,
-            "inputCoverage": coverage.__dict__,
+            "inputCoverage": coverage,
             "dataWindow": self.serious["dataWindow"],
             "generatedAt": datetime.now(timezone.utc).isoformat(),
             "clinicalInterpretation": {

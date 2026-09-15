@@ -31,6 +31,7 @@ def _vocabulary_from_counts(counts: Counter, limit: int) -> dict[str, int]:
 
 @dataclass
 class InputCoverage:
+    sexKnown: bool
     candidateKnown: bool
     indicationKnown: bool
     recognizedCurrentMedications: int
@@ -130,6 +131,7 @@ class FeatureBuilder:
         for medication in known_medications:
             indices.append(offsets["medication"] + self.medication_vocabulary[medication]); values.append(1.0)
         return (indices, values), InputCoverage(
+            sexKnown=sex != UNKNOWN,
             candidateKnown=candidate in self.candidate_vocabulary and candidate != UNKNOWN,
             indicationKnown=indication in self.indication_vocabulary and indication != UNKNOWN,
             recognizedCurrentMedications=len(known_medications), unknownCurrentMedications=unknown_medications,

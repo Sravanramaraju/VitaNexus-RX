@@ -26,7 +26,14 @@ def normalize_drug(value: object) -> str:
 
 
 def normalize_indication(value: object) -> str:
-    return normalize_text(value) or "UNKNOWN"
+    normalized = normalize_text(value)
+    equivalents = {
+        "CHRONIC IRON OVERLOAD": "IRON OVERLOAD",
+        "TRANSFUSIONAL IRON OVERLOAD": "IRON OVERLOAD",
+        "THALASSEMIA": "THALASSAEMIA",
+        "BETA THALASSEMIA": "THALASSAEMIA BETA",
+    }
+    return equivalents.get(normalized, normalized or "UNKNOWN")
 
 
 def normalize_reaction(value: object) -> str:
@@ -35,7 +42,7 @@ def normalize_reaction(value: object) -> str:
 
 def normalize_sex(value: object) -> str:
     normalized = normalize_text(value)
-    return normalized if normalized in {"M", "F"} else "UNKNOWN"
+    return {"M": "M", "MALE": "M", "F": "F", "FEMALE": "F"}.get(normalized, "UNKNOWN")
 
 
 _AGE_TO_YEARS = {

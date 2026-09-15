@@ -1,20 +1,33 @@
 import { z } from "zod";
 import { config } from "../config.js";
 
-export const ADR_INPUT_CONTRACT_VERSION = "vitanexus-lightgbm-overall-risk-input-3.0";
+// Version 4 invalidates persisted predictions created before strict vocabulary
+// coverage was enforced. Those older rows may contain a score produced with an
+// UNKNOWN category and must never be displayed as current clinical evidence.
+export const ADR_INPUT_CONTRACT_VERSION = "vitanexus-lightgbm-overall-risk-input-4.0";
 export const ADR_PROVIDER_VERSION = "python-lightgbm-provider-2.0.0";
 
 const conformalLabels = z.enum(["NO_DOCUMENTED_SERIOUS_OUTCOME", "SERIOUS_OUTCOME"]);
+const inputCoverageSchema = z.object({
+  sexKnown: z.boolean(),
+  candidateKnown: z.boolean(),
+  indicationKnown: z.boolean(),
+  recognizedCurrentMedications: z.number().int().nonnegative(),
+  unknownCurrentMedications: z.array(z.string()),
+});
+
+const versionSchema = z.object({
+  preprocessing: z.string().min(1),
+  features: z.string().min(1).optional(),
+  lightgbm: z.string().min(1),
+  bootstrap: z.string().min(1),
+  conformal: z.string().min(1),
+});
+
 const successfulPredictionSchema = z.object({
-  status: z.enum(["ok", "DEGRADED_COVERAGE"]),
+  status: z.literal("ok"),
   artifactMode: z.literal("FULL"),
-  versions: z.object({
-    preprocessing: z.string().min(1),
-    features: z.string().min(1).optional(),
-    lightgbm: z.string().min(1),
-    bootstrap: z.string().min(1),
-    conformal: z.string().min(1),
-  }),
+  versions: versionSchema,
   overall: z.object({
     task: z.literal("serious-outcome classification among FAERS adverse-event reports"),
     riskProbability: z.number().min(0).max(1),
@@ -30,7 +43,7 @@ const successfulPredictionSchema = z.object({
   }),
   model: z.literal("LightGBM"),
   modelVersion: z.string().min(1),
-  inputCoverage: z.object({ candidateKnown: z.boolean(), indicationKnown: z.boolean(), recognizedCurrentMedications: z.number().int().nonnegative(), unknownCurrentMedications: z.array(z.string()) }),
+  inputCoverage: inputCoverageSchema,
   dataWindow: z.record(z.string(), z.string()),
   generatedAt: z.string(),
   clinicalInterpretation: z.object({ population: z.string(), limitations: z.array(z.string()) }),
@@ -38,6 +51,44 @@ const successfulPredictionSchema = z.object({
   if (value.overall.uncertainty.lower > value.overall.uncertainty.upper) context.addIssue({ code: "custom", message: "Bootstrap lower bound exceeds upper bound." });
   if (value.overall.adjustedRisk !== value.overall.uncertainty.upper) context.addIssue({ code: "custom", message: "Adjusted risk must equal the established conservative bootstrap upper bound." });
   if (value.overall.conformal.setSize !== value.overall.conformal.predictionSet.length) context.addIssue({ code: "custom", message: "Conformal setSize does not match predictionSet." });
+});
+
+const outOfVocabularySchema = z.object({
+  status: z.literal("OUT_OF_VOCABULARY"),
+  artifactMode: z.literal("FULL"),
+  model: z.literal("LightGBM"),
+  modelVersion: z.string().min(1),
+  versions: versionSchema,
+  inputCoverage: inputCoverageSchema,
+  normalizedInput: z.object({
+    sex: z.enum(["M", "F", "UNKNOWN"]),
+    candidateDrug: z.string().min(1),
+    indication: z.string().min(1),
+    currentMedications: z.array(z.string()),
+  }),
+  dataWindow: z.record(z.string(), z.string()),
+  generatedAt: z.string(),
+  message: z.string().min(1),
+});
+
+const coverageSchema = z.object({
+  status: z.enum(["FULL", "OUT_OF_VOCABULARY"]),
+  inputCoverage: inputCoverageSchema,
+  normalizedInput: z.object({
+    sex: z.enum(["M", "F", "UNKNOWN"]),
+    candidateDrug: z.string().min(1),
+    indication: z.string().min(1),
+    currentMedications: z.array(z.string()),
+  }),
+});
+
+const termCoverageItemSchema = z.object({ input: z.string(), normalized: z.string(), supported: z.boolean() });
+const termCoverageSchema = z.object({
+  status: z.literal("ok"),
+  modelVersion: z.string().min(1),
+  candidates: z.array(termCoverageItemSchema),
+  indications: z.array(termCoverageItemSchema),
+  medications: z.array(termCoverageItemSchema),
 });
 
 const unavailableResult = (status, message) => ({
@@ -48,11 +99,27 @@ const unavailableResult = (status, message) => ({
   generatedAt: new Date().toISOString(),
 });
 
+const responseErrorMessage = async (response) => {
+  try {
+    const payload = await response.json();
+    const detail = payload?.detail;
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail)) {
+      const issues = detail.map((issue) => issue?.msg).filter(Boolean);
+      if (issues.length) return issues.join("; ");
+    }
+    if (typeof detail?.message === "string") return detail.message;
+  } catch {
+    // The status code remains useful when a proxy returns a non-JSON response.
+  }
+  return null;
+};
+
 export const buildAdrPredictionInput = ({ consultation, patient, requestId, candidateGeneric = consultation.candidateGeneric }) => ({
   requestId,
   patient: {
     age: patient.age,
-    sex: patient.gender,
+    sex: String(patient.gender || "").trim().toUpperCase() === "FEMALE" ? "F" : String(patient.gender || "").trim().toUpperCase() === "MALE" ? "M" : patient.gender,
     currentMedications: patient.medications
       .filter((medicine) => medicine.status === "ACTIVE")
       .map((medicine) => medicine.genericName)
@@ -79,7 +146,10 @@ export const createPythonAdrPredictionProvider = ({ baseUrl = config.adrMlBaseUr
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(timeoutMs),
       });
-      if (!response.ok) return unavailableResult("ML_UNAVAILABLE", `ML service returned HTTP ${response.status}.`);
+      if (!response.ok) {
+        const detail = await responseErrorMessage(response);
+        return unavailableResult("ML_UNAVAILABLE", `ML service returned HTTP ${response.status}${detail ? `: ${detail}` : "."}`);
+      }
       return await response.json();
     } catch (error) {
       return unavailableResult(error?.name === "TimeoutError" ? "ML_UNAVAILABLE" : "INFERENCE_FAILED", error?.name === "TimeoutError" ? "ML service request timed out." : "ML service could not be reached.");
@@ -93,8 +163,24 @@ export const createPythonAdrPredictionProvider = ({ baseUrl = config.adrMlBaseUr
     async predict(input) {
       const response = await request("/v1/predict", input);
       if (["ML_UNAVAILABLE", "INFERENCE_FAILED"].includes(response.status)) return response;
+      if (response.status === "OUT_OF_VOCABULARY") {
+        const parsed = outOfVocabularySchema.safeParse(response);
+        return parsed.success ? { ...parsed.data, providerName: this.providerName, providerVersion: ADR_PROVIDER_VERSION, inputContractVersion: ADR_INPUT_CONTRACT_VERSION } : unavailableResult("INFERENCE_FAILED", "ML out-of-vocabulary response failed contract validation.");
+      }
       const parsed = successfulPredictionSchema.safeParse(response);
       return parsed.success ? { ...parsed.data, providerName: this.providerName, providerVersion: ADR_PROVIDER_VERSION, inputContractVersion: ADR_INPUT_CONTRACT_VERSION } : unavailableResult("INFERENCE_FAILED", "ML service response failed contract validation.");
+    },
+    async checkCoverage(input) {
+      const response = await request("/v1/lightgbm/input-coverage", input);
+      if (["ML_UNAVAILABLE", "INFERENCE_FAILED"].includes(response.status)) return response;
+      const parsed = coverageSchema.safeParse(response);
+      return parsed.success ? parsed.data : unavailableResult("INFERENCE_FAILED", "ML input-coverage response failed contract validation.");
+    },
+    async checkTerms({ candidates = [], indications = [], medications = [] }) {
+      const response = await request("/v1/lightgbm/term-coverage", { candidates, indications, medications });
+      if (["ML_UNAVAILABLE", "INFERENCE_FAILED"].includes(response.status)) return response;
+      const parsed = termCoverageSchema.safeParse(response);
+      return parsed.success ? parsed.data : unavailableResult("INFERENCE_FAILED", "ML terminology-coverage response failed contract validation.");
     },
     async predictBatch(inputs) {
       if (!inputs.length) return [];
@@ -103,6 +189,10 @@ export const createPythonAdrPredictionProvider = ({ baseUrl = config.adrMlBaseUr
       if (!Array.isArray(response.items) || response.items.length !== inputs.length) return inputs.map(() => unavailableResult("INFERENCE_FAILED", "ML batch response failed contract validation."));
       return response.items.map((item) => {
         if (item.error) return unavailableResult(item.error.status || "INFERENCE_FAILED", item.error.message || "ML inference failed.");
+        if (item.result?.status === "OUT_OF_VOCABULARY") {
+          const parsed = outOfVocabularySchema.safeParse(item.result);
+          return parsed.success ? { ...parsed.data, providerName: this.providerName, providerVersion: ADR_PROVIDER_VERSION, inputContractVersion: ADR_INPUT_CONTRACT_VERSION } : unavailableResult("INFERENCE_FAILED", "ML batch out-of-vocabulary response failed contract validation.");
+        }
         const parsed = successfulPredictionSchema.safeParse(item.result);
         return parsed.success ? { ...parsed.data, providerName: this.providerName, providerVersion: ADR_PROVIDER_VERSION, inputContractVersion: ADR_INPUT_CONTRACT_VERSION } : unavailableResult("INFERENCE_FAILED", "ML service response failed contract validation.");
       });
