@@ -332,17 +332,24 @@ function PrescribedDrug({ value, onChange }) {
                 <button
                   type="button"
                   key={item.brand}
-                  disabled={item.candidateModelSupported === false}
                   onClick={() => {
-                    onChange(resolveDrugInput({ ...item, generic: item.genericName }));
+                    onChange({
+                      ...resolveDrugInput({ ...item, generic: item.genericName }),
+                      candidateModelCoverage: item.candidateModelSupported,
+                    });
                     setQuery("");
                   }}
-                  className="block w-full px-3 py-2 text-left text-sm hover:bg-primary/10 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400 dark:disabled:bg-slate-900/40"
+                  className="block w-full px-3 py-2 text-left text-sm hover:bg-primary/10"
                 >
                   <strong>{item.brand}</strong>
                   <span className="block text-xs text-slate-500">
-                    Generic: {item.genericName} · {item.candidateModelSupported === false ? "Not covered as a candidate drug" : item.candidateModelSupported === true ? "LightGBM covered" : "Coverage check unavailable"}
+                    Generic: {item.genericName} · {item.mappingSource}
                   </span>
+                  {item.candidateModelSupported === false
+                    ? <span className="mt-1 inline-flex rounded-full bg-danger/10 px-2 py-0.5 text-xs font-semibold text-danger">No ADR Assessment</span>
+                    : item.candidateModelSupported === true
+                      ? <span className="mt-1 inline-flex rounded-full bg-success/10 px-2 py-0.5 text-xs font-semibold text-success">LightGBM covered</span>
+                      : <span className="mt-1 inline-flex rounded-full bg-warning/10 px-2 py-0.5 text-xs font-semibold text-warning">Coverage check unavailable</span>}
                 </button>
               ))
             ) : (
@@ -358,6 +365,7 @@ function PrescribedDrug({ value, onChange }) {
           <span className="font-semibold">
             Entered drug name: {value.enteredName || value.brand} / Generic name: {value.generic} / Mapping source: {value.mappingSource || "Indian Medicine Dataset"}
           </span>
+          {value.candidateModelCoverage === false && <span className="mt-1 block font-semibold text-danger">No ADR Assessment</span>}
           <ExplainToggle reasons={getDrugSelectionReasons()} />
         </div>
       )}
