@@ -80,6 +80,20 @@ def test_unknown_indication_is_not_scored_as_an_ordinary_category():
     assert "overall" not in result
 
 
+def test_unknown_current_medicine_returns_an_explicit_degraded_estimate():
+    predictor = LightGBMPredictor()
+    result = predictor.predict({
+        "patient": {"age": 50, "sex": "F", "currentMedications": ["Warfarin", "Unlisted medicine"]},
+        "candidateDrug": {"canonicalName": "Ibuprofen", "ingredients": []},
+        "indication": {"id": "pain", "name": "Pain", "source": "DrugCentral"},
+    })
+
+    assert result["status"] == "DEGRADED_COVERAGE"
+    assert result["inputCoverage"]["unknownCurrentMedications"] == ["UNLISTED MEDICINE"]
+    assert 0.0 <= result["overall"]["riskProbability"] <= 1.0
+    assert "incomplete medication coverage" in result["message"]
+
+
 def test_coverage_endpoints_identify_supported_correction():
     payload = {
         "requestId": "coverage-test",
@@ -96,3 +110,18 @@ def test_coverage_endpoints_identify_supported_correction():
     assert request_coverage.json()["inputCoverage"]["sexKnown"] is True
     supported = {item["input"]: item["supported"] for item in term_coverage.json()["indications"]}
     assert supported == {"Diagnostic aid": False, "Iron overload": True}
+
+
+def test_coverage_endpoint_marks_unknown_current_medicine_as_degraded():
+    payload = {
+        "requestId": "coverage-degraded-test",
+        "patient": {"age": 50, "sex": "F", "currentMedications": ["Warfarin", "Unlisted medicine"]},
+        "candidateDrug": {"canonicalName": "Ibuprofen", "ingredients": []},
+        "indication": {"id": "pain", "name": "Pain", "source": "DrugCentral"},
+    }
+    with TestClient(app) as client:
+        response = client.post("/v1/lightgbm/input-coverage", json=payload)
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "DEGRADED_COVERAGE"
+    assert response.json()["inputCoverage"]["unknownCurrentMedications"] == ["UNLISTED MEDICINE"]

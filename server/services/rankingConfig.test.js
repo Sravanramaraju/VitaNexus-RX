@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   RANKING_WEIGHT_TOTAL,
   RANKING_WEIGHTS,
+  DEGRADED_ADR_RANKING_WEIGHTS,
+  COVERAGE_PENALTY_RISK,
   normalizeDdiRisk,
   normalizeDrugDiseaseRisk,
 } from "./rankingConfig.js";
@@ -10,6 +12,11 @@ describe("safety-aware ranking configuration", () => {
   it("uses exactly the locked 50/30/20 weighting", () => {
     expect(RANKING_WEIGHTS).toEqual({ adjustedLightgbmRisk: 0.5, ddiRisk: 0.3, drugDiseaseRisk: 0.2 });
     expect(RANKING_WEIGHT_TOTAL).toBe(1);
+  });
+
+  it("uses a conservative complete-score penalty when ADR medication coverage is degraded", () => {
+    expect(DEGRADED_ADR_RANKING_WEIGHTS).toEqual({ adjustedLightgbmRisk: 0.25, ddiRisk: 0.3, drugDiseaseRisk: 0.2, coveragePenalty: 0.25 });
+    expect(COVERAGE_PENALTY_RISK).toBe(1);
   });
 
   it("keeps missing evidence distinct from known low risk", () => {

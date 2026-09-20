@@ -62,6 +62,19 @@ describe("Python ADR provider", () => {
     expect(result.inputCoverage.indicationKnown).toBe(false);
     expect(result).not.toHaveProperty("overall");
   });
+  it("accepts a degraded current-medication estimate with its explicit status", async () => {
+    const degraded = {
+      ...valid,
+      status: "DEGRADED_COVERAGE",
+      inputCoverage: { ...valid.inputCoverage, unknownCurrentMedications: ["UNLISTED MEDICINE"] },
+      message: "Incomplete medication coverage.",
+    };
+    const provider = createPythonAdrPredictionProvider({ baseUrl: "http://ml", fetchImplementation: async () => ({ ok: true, json: async () => degraded }) });
+    const result = await provider.predict({ requestId: "r" });
+    expect(result.status).toBe("DEGRADED_COVERAGE");
+    expect(result.overall.adjustedRisk).toBe(0.3);
+    expect(result.inputCoverage.unknownCurrentMedications).toEqual(["UNLISTED MEDICINE"]);
+  });
   it("checks complete-request and terminology coverage", async () => {
     const fetchImplementation = vi.fn(async (url) => ({
       ok: true,

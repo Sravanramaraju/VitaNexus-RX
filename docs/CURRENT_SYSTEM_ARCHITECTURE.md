@@ -109,7 +109,7 @@ Express:
 - legacy-compatible `GET .../adr-prediction`
 - `POST/GET /api/v1/consultations/:id/recommendations`
 
-The ADR page implements LOADING, SUCCESS, INPUT-CORRECTION-NEEDED, UNAVAILABLE, and FAILED states. A calibrated probability, bootstrap range, conservative upper bound, and conformal classification set are displayed only when every protected LightGBM input is covered. An out-of-vocabulary sex, candidate drug, indication, or active medicine produces no percentage and opens a clinician-controlled correction workflow. The separate Specific Event Profile implements loading, success, limited-coverage, empty, and explicit-unavailable states; it shows ordered baseline HGNN event scores, provenance, and audit limitations.
+The ADR page implements LOADING, SUCCESS, INPUT-CORRECTION-NEEDED, UNAVAILABLE, and FAILED states. A calibrated probability, bootstrap range, conservative upper bound, and conformal classification set are displayed when the patient sex, candidate drug, and indication are covered. An out-of-vocabulary sex, candidate drug, or indication produces no percentage and opens a clinician-controlled correction workflow. An unsupported active/current medicine produces an explicitly labelled `DEGRADED_COVERAGE` estimate: it is retained as incomplete medication coverage and receives a conservative ranking adjustment. The separate Specific Event Profile implements loading, success, limited-coverage, empty, and explicit-unavailable states; it shows ordered baseline HGNN event scores, provenance, and audit limitations.
 
 ## Persistence/version invalidation
 
@@ -119,7 +119,7 @@ The ADR page implements LOADING, SUCCESS, INPUT-CORRECTION-NEEDED, UNAVAILABLE, 
 
 ## Failure and security behavior
 
-- LightGBM returns `OUT_OF_VOCABULARY` with no `overall` score when any required input is unsupported; `ML_UNAVAILABLE` and `INFERENCE_FAILED` are also explicit. `DEGRADED_COVERAGE` remains specific to the supplementary baseline HGNN and is never interpreted as a complete LightGBM result.
+- LightGBM returns `OUT_OF_VOCABULARY` with no `overall` score when sex, candidate drug, or indication is unsupported. Unsupported current medicines return an explicitly incomplete `DEGRADED_COVERAGE` estimate; their ranking uses 25% LightGBM risk, 30% DDI risk, 20% drug-disease risk, and a 25% maximal coverage penalty. `ML_UNAVAILABLE` and `INFERENCE_FAILED` remain explicit and never receive an inferred score. The supplementary baseline HGNN has its own `DEGRADED_COVERAGE` status and is not a ranking input.
 - Fast artifacts include `-fast-smoke` versions and always render DEGRADED; they are not final models.
 - Express logs normal request metadata, not full clinical payloads.
 - Patient/consultation queries remain clinician-scoped.

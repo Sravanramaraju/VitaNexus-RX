@@ -62,19 +62,6 @@ const resolveConsultationIndication = async (consultation) => {
   };
 };
 
-const requireFullLightgbmCoverage = async ({ consultation, patient, requestId }) => {
-  const input = buildAdrPredictionInput({ consultation, patient, requestId });
-  const coverage = await adrPredictionProvider.checkCoverage(input);
-  if (coverage.status !== "OUT_OF_VOCABULARY") return coverage;
-  const missing = [
-    ...(!coverage.inputCoverage.sexKnown ? ["patient sex"] : []),
-    ...(!coverage.inputCoverage.candidateKnown ? [`candidate medicine '${consultation.candidateGeneric}'`] : []),
-    ...(!coverage.inputCoverage.indicationKnown ? [`indication '${consultation.indication}'`] : []),
-    ...coverage.inputCoverage.unknownCurrentMedications.map((name) => `current medicine '${name}'`),
-  ];
-  throw Object.assign(new Error(`LightGBM cannot fully encode ${missing.join(", ")}. Select a model-supported clinical term; incomplete inputs are never scored.`), { status: 422, code: "LIGHTGBM_INPUT_NOT_SUPPORTED" });
-};
-
 const ensureConsultationIndicationProvenance = async (consultation) => {
   if (consultation.indicationId && consultation.indicationSource === "DrugCentral") return resolveConsultationIndication(consultation);
   const normalizedIndication = normalizeClinicalTerm(consultation.indication);
@@ -237,8 +224,7 @@ export const createApp = () => {
 
   app.post("/api/v1/patients/:patientId/consultations", authenticate, asyncRoute(async (req, res) => {
     const input = await resolveConsultationDrug(await resolveConsultationIndication(consultationSchema.parse(req.body)));
-    const patient = await getPatient(prisma, req.auth.clinicianId, req.params.patientId, { medications: true });
-    await requireFullLightgbmCoverage({ consultation: input, patient, requestId: req.requestId });
+    const patient = await getPatient(prisma, req.auth.clinicianId, req.params.patientId, false);
     const consultation = await transaction(async (tx) => { const created = await tx.consultation.create({ data: { patientId: patient.id, clinicianId: req.auth.clinicianId, ...input } }); await audit(tx, { actorId: req.auth.clinicianId, action: "CONSULTATION_CREATED", entityType: "Consultation", entityId: created.id, requestId: req.requestId }); return created; });
     send(res, 201, consultationResponse(consultation), req.requestId);
   }));
@@ -248,7 +234,6 @@ export const createApp = () => {
     const existing = await getConsultation(prisma, req.auth.clinicianId, req.params.consultationId);
     if (change.expectedVersion && change.expectedVersion !== existing.version) throw conflict();
     const resolved = await resolveConsultationIndication({ ...existing, ...change });
-    await requireFullLightgbmCoverage({ consultation: resolved, patient: existing.patient, requestId: req.requestId });
     const updated = await transaction(async (tx) => {
       await tx.adrPrediction.deleteMany({ where: { consultationId: existing.id } });
       await tx.hgnnEventPrediction.deleteMany({ where: { consultationId: existing.id } });

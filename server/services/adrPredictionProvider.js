@@ -1,10 +1,10 @@
 import { z } from "zod";
 import { config } from "../config.js";
 
-// Version 4 invalidates persisted predictions created before strict vocabulary
-// coverage was enforced. Those older rows may contain a score produced with an
-// UNKNOWN category and must never be displayed as current clinical evidence.
-export const ADR_INPUT_CONTRACT_VERSION = "vitanexus-lightgbm-overall-risk-input-4.0";
+// Version 5 invalidates strict-coverage rows. Current-medication terms outside
+// the vocabulary now receive an explicitly degraded result, while unresolved
+// candidate, indication, and sex inputs remain unscored.
+export const ADR_INPUT_CONTRACT_VERSION = "vitanexus-lightgbm-overall-risk-input-5.0";
 export const ADR_PROVIDER_VERSION = "python-lightgbm-provider-2.0.0";
 
 const conformalLabels = z.enum(["NO_DOCUMENTED_SERIOUS_OUTCOME", "SERIOUS_OUTCOME"]);
@@ -25,7 +25,7 @@ const versionSchema = z.object({
 });
 
 const successfulPredictionSchema = z.object({
-  status: z.literal("ok"),
+  status: z.enum(["ok", "DEGRADED_COVERAGE"]),
   artifactMode: z.literal("FULL"),
   versions: versionSchema,
   overall: z.object({
@@ -46,11 +46,15 @@ const successfulPredictionSchema = z.object({
   inputCoverage: inputCoverageSchema,
   dataWindow: z.record(z.string(), z.string()),
   generatedAt: z.string(),
+  message: z.string().min(1).optional(),
   clinicalInterpretation: z.object({ population: z.string(), limitations: z.array(z.string()) }),
 }).superRefine((value, context) => {
   if (value.overall.uncertainty.lower > value.overall.uncertainty.upper) context.addIssue({ code: "custom", message: "Bootstrap lower bound exceeds upper bound." });
   if (value.overall.adjustedRisk !== value.overall.uncertainty.upper) context.addIssue({ code: "custom", message: "Adjusted risk must equal the established conservative bootstrap upper bound." });
   if (value.overall.conformal.setSize !== value.overall.conformal.predictionSet.length) context.addIssue({ code: "custom", message: "Conformal setSize does not match predictionSet." });
+  const hasUnknownCurrentMedication = value.inputCoverage.unknownCurrentMedications.length > 0;
+  if (value.status === "DEGRADED_COVERAGE" && (!hasUnknownCurrentMedication || !value.message)) context.addIssue({ code: "custom", message: "Degraded coverage must identify an unsupported current medicine and include a message." });
+  if (value.status === "ok" && hasUnknownCurrentMedication) context.addIssue({ code: "custom", message: "A complete result cannot contain unsupported current medicines." });
 });
 
 const outOfVocabularySchema = z.object({
@@ -72,7 +76,7 @@ const outOfVocabularySchema = z.object({
 });
 
 const coverageSchema = z.object({
-  status: z.enum(["FULL", "OUT_OF_VOCABULARY"]),
+  status: z.enum(["FULL", "DEGRADED_COVERAGE", "OUT_OF_VOCABULARY"]),
   inputCoverage: inputCoverageSchema,
   normalizedInput: z.object({
     sex: z.enum(["M", "F", "UNKNOWN"]),
