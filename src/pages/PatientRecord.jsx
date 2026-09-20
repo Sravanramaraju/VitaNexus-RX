@@ -64,6 +64,7 @@ function AssessmentBadge({ severity }) {
     ELIGIBLE: "SAFETY CHECKS PASSED",
     INPUT_CORRECTION_NEEDED: "INPUT CORRECTION NEEDED",
     RANKING_UNAVAILABLE: "RANKING UNAVAILABLE",
+    DEGRADED_ADR: "DEGRADED ADR",
     DDINTER_IDENTIFIER_UNRESOLVED: "DRUG NOT COVERED BY DDINTER",
     DDINTER_LOOKUP_FAILED: "DDINTER LOOKUP FAILED",
     NOT_RECOMMENDED: "NOT RECOMMENDED",
@@ -82,6 +83,8 @@ function AssessmentBadge({ severity }) {
       ? "bg-danger"
       : label === INCOMPLETE_RELATIONSHIP_LABEL
         ? "bg-slate-500"
+        : label === "DEGRADED ADR"
+          ? "bg-slate-500"
         : label === "Moderate" || label === "MODERATE" || label === "NOT EVALUATED" || label === "INPUT CORRECTION NEEDED" || label === "RANKING UNAVAILABLE" || label === "DRUG NOT COVERED BY DDINTER" || label === "DDINTER LOOKUP FAILED"
         ? "bg-warning text-slate-900"
         : "bg-success";
@@ -130,7 +133,8 @@ function RecommendationMlDetails({ recommendation }) {
     const missing = missingLightgbmInputs(ml?.inputCoverage);
     return <div className="mt-3 rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs"><strong>{gated ? "LightGBM ranking was not run." : ml?.status === "OUT_OF_VOCABULARY" ? "LightGBM input correction needed." : "LightGBM ranking unavailable."}</strong> {gated ? "Source coverage is incomplete, so no safety score was inferred." : ml?.status === "OUT_OF_VOCABULARY" ? `${missing.length ? `Correct the ${missing.join(", ")}. ` : "Correct the unsupported consultation input. "}The DDInter and DrugCentral checks passed, so this is not a DDInter source-coverage result.` : "The safety checks passed, but the ranking model did not return a usable score."}</div>;
   }
-  return <div className="mt-3 border-t border-border pt-3 dark:border-slate-600">{ml.status === "DEGRADED_COVERAGE" && <div className="mb-3 rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs"><strong>Degraded ML coverage:</strong> Some inputs were outside the trained vocabulary, so the candidate is not automatically scored.</div>}<div className="grid grid-cols-2 gap-x-5 gap-y-4"><Metric label="Overall adverse risk">{probability(ml.overall.riskProbability)}</Metric><Metric label="90% bootstrap range">{probability(ml.overall.uncertainty.lower)} – {probability(ml.overall.uncertainty.upper)}</Metric><Metric label="Adjusted adverse risk">{probability(ml.overall.adjustedRisk)}</Metric><Metric label="Conformal reliability">{ml.overall.conformal.reliability?.replaceAll("_", " ")}</Metric></div><p className="mt-3 text-xs text-slate-500">{recommendation.ranking?.explanation}</p></div>;
+  const degradedAdr = ml.status === "DEGRADED_COVERAGE";
+  return <div className="mt-3 border-t border-border pt-3 dark:border-slate-600">{degradedAdr && <div className="mb-3"><AssessmentBadge severity="DEGRADED_ADR" /></div>}<div className="grid grid-cols-2 gap-x-5 gap-y-4"><Metric label="Overall adverse risk">{probability(ml.overall.riskProbability)}</Metric><Metric label="90% bootstrap range">{probability(ml.overall.uncertainty.lower)} – {probability(ml.overall.uncertainty.upper)}</Metric><Metric label="Adjusted adverse risk">{probability(ml.overall.adjustedRisk)}</Metric><Metric label="Conformal reliability">{ml.overall.conformal.reliability?.replaceAll("_", " ")}</Metric></div>{!degradedAdr && <p className="mt-3 text-xs text-slate-500">{recommendation.ranking?.explanation}</p>}</div>;
 }
 
 function SideEffectField({ value, onChange }) {
