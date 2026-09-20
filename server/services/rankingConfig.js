@@ -6,6 +6,15 @@ export const RANKING_WEIGHTS = Object.freeze({
   drugDiseaseRisk: 0.20,
 });
 
+export const DEGRADED_ADR_RANKING_WEIGHTS = Object.freeze({
+  adjustedLightgbmRisk: 0.25,
+  ddiRisk: 0.30,
+  drugDiseaseRisk: 0.20,
+  coveragePenalty: 0.25,
+});
+
+export const COVERAGE_PENALTY_RISK = 1.00;
+
 export const RANKING_WEIGHT_TOTAL = Object.values(RANKING_WEIGHTS).reduce((total, value) => total + value, 0);
 
 if (Math.abs(RANKING_WEIGHT_TOTAL - 1) > Number.EPSILON) {
@@ -41,10 +50,12 @@ export const isSevereDdi = (severity) => severity === "MAJOR";
 export const isSeriousDrugDiseaseRestriction = (assessment) => assessment === "HIGH";
 
 export const rankingConfig = Object.freeze({
-  configId: "vitanexus-safety-aware-50-30-20-1.1.0",
+  configId: "vitanexus-safety-aware-degraded-adr-1.2.0",
   weights: RANKING_WEIGHTS,
+  degradedAdrWeights: DEGRADED_ADR_RANKING_WEIGHTS,
+  coveragePenaltyRisk: COVERAGE_PENALTY_RISK,
   weightsStatus: "CONFIGURED_RESEARCH_HYPERPARAMETERS",
   candidateSource: "DrugCentral indication relationships",
-  formula: "0.50 × uncertainty-adjusted LightGBM risk + 0.30 × DDI risk + 0.20 × drug-disease risk",
+  formula: "Full coverage: 0.50 × uncertainty-adjusted LightGBM risk + 0.30 × DDI risk + 0.20 × drug-disease risk. Degraded ADR coverage: 0.25 × uncertainty-adjusted LightGBM risk + 0.30 × DDI risk + 0.20 × drug-disease risk + 0.25 × coverage penalty.",
   missingDataPolicy: "requires_review",
 });

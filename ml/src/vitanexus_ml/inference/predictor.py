@@ -106,9 +106,16 @@ class LightGBMPredictor:
             "indication": indication,
             "currentMedications": current,
         })
-        full = coverage.sexKnown and coverage.candidateKnown and coverage.indicationKnown and not coverage.unknownCurrentMedications
+        essential_inputs_known = coverage.sexKnown and coverage.candidateKnown and coverage.indicationKnown
+        status = (
+            "OUT_OF_VOCABULARY"
+            if not essential_inputs_known
+            else "DEGRADED_COVERAGE"
+            if coverage.unknownCurrentMedications
+            else "FULL"
+        )
         return {
-            "status": "FULL" if full else "OUT_OF_VOCABULARY",
+            "status": status,
             "inputCoverage": coverage.__dict__,
             "normalizedInput": {
                 "sex": sex,
@@ -144,7 +151,7 @@ class LightGBMPredictor:
         coverage = inspected["inputCoverage"]
         if int(matrix.shape[1]) != len(self.serious["featureBuilder"].feature_names):
             raise ArtifactsUnavailable("Generated LightGBM feature schema does not match the persisted schema.")
-        if inspected["status"] != "FULL":
+        if inspected["status"] == "OUT_OF_VOCABULARY":
             return {
                 "status": "OUT_OF_VOCABULARY",
                 "artifactMode": "FULL",
@@ -192,8 +199,9 @@ class LightGBMPredictor:
                 "intervalNote": "Split-conformal classification produces a prediction set, not a probability confidence interval.",
             },
         }
+        degraded_coverage = inspected["status"] == "DEGRADED_COVERAGE"
         return {
-            "status": "ok",
+            "status": "DEGRADED_COVERAGE" if degraded_coverage else "ok",
             "artifactMode": "FULL",
             "model": "LightGBM",
             "modelVersion": versions["lightgbm"],
@@ -216,6 +224,9 @@ class LightGBMPredictor:
                     "Conformal output expresses classification-set reliability, not a conventional probability confidence interval.",
                 ],
             },
+            **({
+                "message": "One or more active medicines are not represented in the LightGBM current-medication vocabulary. This is an exploratory estimate with incomplete medication coverage.",
+            } if degraded_coverage else {}),
         }
 
 

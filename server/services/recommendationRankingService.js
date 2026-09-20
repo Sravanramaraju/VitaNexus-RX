@@ -104,7 +104,7 @@ const evaluateKnownSafety = async ({ candidate, patient, knowledgeRepository }) 
   };
 };
 
-const isMlAvailable = (candidate) => candidate.ml?.status === "ok" && normalizeProbability(candidate.ml?.overall?.adjustedRisk) !== null;
+const isMlAvailable = (candidate) => ["ok", "DEGRADED_COVERAGE"].includes(candidate.ml?.status) && normalizeProbability(candidate.ml?.overall?.adjustedRisk) !== null;
 
 const scoreCandidate = (candidate) => {
   if (candidate.gate.status !== "ELIGIBLE") {
@@ -135,10 +135,13 @@ const scoreCandidate = (candidate) => {
   if (adjustedRisk === null || ddiRisk === null || drugDiseaseRisk === null) {
     return { ...candidate, status: "REQUIRES_REVIEW", assessment: "REQUIRES_REVIEW", reasons: [...candidate.gate.reasons, "An essential ranking dimension is unavailable; no score was inferred."] };
   }
+  const degradedAdr = candidate.ml.status === "DEGRADED_COVERAGE";
+  const weights = degradedAdr ? rankingConfig.degradedAdrWeights : rankingConfig.weights;
   const finalRiskScore = (
-    rankingConfig.weights.adjustedLightgbmRisk * adjustedRisk
-    + rankingConfig.weights.ddiRisk * ddiRisk
-    + rankingConfig.weights.drugDiseaseRisk * drugDiseaseRisk
+    weights.adjustedLightgbmRisk * adjustedRisk
+    + weights.ddiRisk * ddiRisk
+    + weights.drugDiseaseRisk * drugDiseaseRisk
+    + (degradedAdr ? weights.coveragePenalty * rankingConfig.coveragePenaltyRisk : 0)
   );
   return {
     ...candidate,
@@ -148,11 +151,12 @@ const scoreCandidate = (candidate) => {
     safetyScore: (1 - finalRiskScore) * 100,
     components: {
       lightgbmAdjustedRisk: adjustedRisk,
-      lightgbmWeight: rankingConfig.weights.adjustedLightgbmRisk,
+      lightgbmWeight: weights.adjustedLightgbmRisk,
       ddiRisk,
-      ddiWeight: rankingConfig.weights.ddiRisk,
+      ddiWeight: weights.ddiRisk,
       drugDiseaseRisk,
-      drugDiseaseWeight: rankingConfig.weights.drugDiseaseRisk,
+      drugDiseaseWeight: weights.drugDiseaseRisk,
+      ...(degradedAdr ? { coveragePenaltyRisk: rankingConfig.coveragePenaltyRisk, coveragePenaltyWeight: weights.coveragePenalty } : {}),
     },
     reasons: [
       "Candidate identified from a DrugCentral same-indication relationship.",
@@ -173,7 +177,9 @@ export const compareRecommendations = (first, second) => {
   return first.drug.localeCompare(second.drug);
 };
 
-const rankExplanation = (candidate) => `Safety-aware ranking: ${(candidate.components.lightgbmWeight * 100).toFixed(0)}% uncertainty-adjusted LightGBM risk, ${(candidate.components.ddiWeight * 100).toFixed(0)}% DDInter risk, and ${(candidate.components.drugDiseaseWeight * 100).toFixed(0)}% DrugCentral drug-disease risk. Conformal information modifies the LightGBM interpretation and has no independent weight.`;
+const rankExplanation = (candidate) => candidate.ml?.status === "DEGRADED_COVERAGE"
+  ? "Safety-aware ranking completed."
+  : `Safety-aware ranking: ${(candidate.components.lightgbmWeight * 100).toFixed(0)}% uncertainty-adjusted LightGBM risk, ${(candidate.components.ddiWeight * 100).toFixed(0)}% DDInter risk, and ${(candidate.components.drugDiseaseWeight * 100).toFixed(0)}% DrugCentral drug-disease risk. Conformal information modifies the LightGBM interpretation and has no independent weight.`;
 
 export const rankRecommendations = async ({ consultation, patient, knowledgeRepository, requestId, provider = adrPredictionProvider }) => {
   const candidates = await knowledgeRepository.findCandidateDrugs(consultation.indication);

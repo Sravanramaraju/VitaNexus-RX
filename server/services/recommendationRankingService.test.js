@@ -80,6 +80,29 @@ describe("safety-aware alternative ranking", () => {
     });
   });
 
+  it("ranks a degraded ADR estimate with half the normal LightGBM weight and a coverage penalty", async () => {
+    const degradedProvider = {
+      predictBatch: async (inputs) => inputs.map(() => ({
+        status: "DEGRADED_COVERAGE",
+        overall: { adjustedRisk: 0.3, conformal: { predictionSet: ["NO_DOCUMENTED_SERIOUS_OUTCOME"] } },
+      })),
+    };
+    const results = await rankRecommendations({ consultation, patient, knowledgeRepository: repository, requestId: "test", provider: degradedProvider });
+    const candidate = results.find((item) => item.drug === "Lower risk");
+    expect(candidate).toMatchObject({
+      status: "RECOMMENDED",
+      ml: { status: "DEGRADED_COVERAGE" },
+      components: {
+        lightgbmWeight: 0.25,
+        ddiWeight: 0.3,
+        drugDiseaseWeight: 0.2,
+        coveragePenaltyWeight: 0.25,
+        coveragePenaltyRisk: 1,
+      },
+    });
+    expect(candidate.finalRiskScore).toBeCloseTo(0.475);
+  });
+
   it("does not accept HGNN or allergy data as a scoring component", async () => {
     const baseline = await rankRecommendations({ consultation, patient, knowledgeRepository: repository, requestId: "test", provider });
     const withAllergyAndHgnn = await rankRecommendations({
