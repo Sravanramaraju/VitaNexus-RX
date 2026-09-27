@@ -77,8 +77,13 @@ def hgnn_training_status() -> dict:
     completed_epochs = int(selection.get("completedEpoch", selection.get("epochs", 0)) or 0)
     total_epochs = int(selection.get("totalEpochs", state.get("identity", {}).get("hgnnConfig", {}).get("epochs", 20)) or 20)
     promoted = stages.get("promoted", {}).get("status") == "complete"
+    selection_complete = selection.get("status") == "complete"
     return {
-        "status": "COMPLETE" if promoted else "IN_PROGRESS_OR_INTERRUPTED",
+        "status": (
+            "COMPLETE" if promoted
+            else "SELECTION_COMPLETE_AWAITING_FINAL_REFIT" if selection_complete
+            else "IN_PROGRESS_OR_INTERRUPTED"
+        ),
         "run": state_path.parent.name,
         "statePath": str(state_path),
         "updatedAt": state.get("updatedAt"),
@@ -86,7 +91,7 @@ def hgnn_training_status() -> dict:
         "selection": {
             "completedEpochs": completed_epochs,
             "totalEpochs": total_epochs,
-            "resumeAtEpoch": min(completed_epochs + 1, total_epochs) if not promoted else None,
+            "resumeAtEpoch": min(completed_epochs + 1, total_epochs) if not promoted and not selection_complete else None,
             "bestEpoch": selection.get("bestEpoch"),
             "bestValidationMicroAUPRC": selection.get("bestValidationMicroAUPRC"),
         },

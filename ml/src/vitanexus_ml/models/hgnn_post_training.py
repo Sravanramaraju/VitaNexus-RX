@@ -62,25 +62,28 @@ def create_checkpoint_integrity_manifest(
         raise RuntimeError("HGNN checkpoint versions differ from the supported frozen evaluation contract")
     vocabulary = _vocabulary(run_root)
     files = {}
-    for name in (
+    required_files = (
         "hgnn_selection_best.pt",
         "hgnn_selection_latest.pt",
-        "hgnn_final_refit_latest.pt",
         "adr_vocabulary.json",
         "development_associations.joblib",
-        "final_associations.joblib",
         "state.json",
-    ):
+    )
+    for name in required_files:
         path = run_root / name
         if not path.exists():
             raise FileNotFoundError(path)
         files[name] = {"sha256": file_sha256(path), "bytes": path.stat().st_size}
+    # The focal-objective artifact is part of a new selection run's scientific
+    # identity. It is optional only to keep the legacy frozen snapshot readable.
+    objective_path = run_root / "hgnn_focal_objective.json"
+    if objective_path.exists():
+        files[objective_path.name] = {"sha256": file_sha256(objective_path), "bytes": objective_path.stat().st_size}
     selection = torch.load(run_root / "hgnn_selection_best.pt", map_location="cpu", weights_only=False)
-    partial = torch.load(run_root / "hgnn_final_refit_latest.pt", map_location="cpu", weights_only=False)
-    if int(selection["epoch"]) + 1 != 20:
+    selected_epochs = int(identity["hgnnConfig"]["epochs"])
+    if selected_epochs != 20 or int(selection["epoch"]) + 1 != selected_epochs:
         raise RuntimeError("Protected selection checkpoint is not epoch 20")
-    if int(partial["nextEpoch"]) != 5:
-        raise RuntimeError("Protected partial-refit checkpoint is not the expected five-epoch experiment")
+    training_objective = selection.get("checkpointMetadata", {}).get("trainingObjective")
     manifest = {
         "version": HGNN_POST_TRAINING_VERSION,
         "createdAt": utc_now(),
@@ -93,12 +96,9 @@ def create_checkpoint_integrity_manifest(
             "configuration": identity["hgnnConfig"],
             "labelCount": len(vocabulary),
             "labelOrderSha256": _label_hash(vocabulary),
-            "selection": {"epoch": 20, "checkpoint": "hgnn_selection_best.pt"},
-            "partialRefit": {
-                "completedEpochs": 5,
-                "checkpoint": "hgnn_final_refit_latest.pt",
-                "status": "experimental-not-promoted",
-            },
+            "selection": {"epoch": selected_epochs, "checkpoint": "hgnn_selection_best.pt"},
+            "finalRefit": {"status": "not-run; selection evidence awaiting review"},
+            "trainingObjective": training_objective,
         },
         "input": identity["input"],
         "files": files,
@@ -134,6 +134,8 @@ def _count_window(parquet: pq.ParquetFile, window: tuple[str, str]) -> int:
 def _load_frozen_model(manifest: dict, model_kind: str, device: torch.device):
     if model_kind not in MODEL_FILES:
         raise ValueError(f"Unknown frozen HGNN model kind: {model_kind}")
+    if MODEL_FILES[model_kind][0] not in manifest["files"]:
+        raise ValueError(f"Frozen HGNN model kind is unavailable in this manifest: {model_kind}")
     snapshot_root = Path(manifest["snapshotRoot"])
     run_root = _run_root(snapshot_root, manifest["runKey"])
     checkpoint_name, association_name = MODEL_FILES[model_kind]
