@@ -31,7 +31,7 @@ HGNN_VERSION = "faers-specific-adr-hgnn-1.0.0"
 TRAINING_PIPELINE_VERSION = "faers-laptop-training-2.0.2"
 PORTABLE_STATE_VERSION = "vitanexus-portable-training-state-1.0.0"
 INFERENCE_BUNDLE_VERSION = "vitanexus-inference-bundle-1.0.0"
-HGNN_TRAINING_PIPELINE_VERSION = "faers-hgnn-colab-training-2.0.0"
+HGNN_TRAINING_PIPELINE_VERSION = "faers-hgnn-colab-training-2.1.0"
 
 SERIOUS_OUTCOME_CODES = frozenset({"DE", "LT", "HO", "DS", "CA", "RI", "OT"})
 NO_SERIOUS = "NO_DOCUMENTED_SERIOUS_OUTCOME"

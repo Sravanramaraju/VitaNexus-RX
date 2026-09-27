@@ -41,6 +41,7 @@ from vitanexus_ml.models.hgnn import (
     _targets,
     build_heterodata,
 )
+from vitanexus_ml.models.hgnn_evaluation import per_label_metrics, top_k_metrics
 from vitanexus_ml.normalization import normalize_drug, normalize_indication, normalize_reaction
 from vitanexus_ml.training_runtime import (
     ProgressReporter,
@@ -83,6 +84,10 @@ class HgnnTrainConfig:
     baseline_sample_rows: int = 400_000
     baseline_mlp_max_iter: int = 80
     use_amp: bool = True
+    focal_gamma: float = 2.0
+    focal_alpha_minimum: float = 0.25
+    focal_alpha_maximum: float = 0.95
+    evaluation_top_k: tuple[int, ...] = (5, 10)
 
 
 def assert_hgnn_temporal_integrity(partitions: dict = PARTITIONS) -> None:
@@ -154,6 +159,63 @@ def _streaming_vocabulary(parquet: pq.ParquetFile, config: TrainConfig) -> list[
     ]
     progress.finish(f"labels={len(vocabulary)}")
     return vocabulary
+
+
+def _streaming_label_positive_counts(parquet: pq.ParquetFile, vocabulary: list[dict]) -> tuple[np.ndarray, int]:
+    """Count each selected ADR at report level on development rows only."""
+    labels = {item["term"]: item["index"] for item in vocabulary}
+    counts = np.zeros(len(vocabulary), dtype=np.int64)
+    progress = ProgressReporter("hgnn-focal-label-counts", EXPECTED_ROWS["developmentTrain"])
+    rows = 0
+    for frame in _iter_frames(parquet, PARTITIONS["developmentTrain"], 100_000, ["quarter", "reactions"]):
+        for reactions in frame["reactions"]:
+            present = {
+                labels[term]
+                for term in (normalize_reaction(value) for value in _items(reactions))
+                if term in labels
+            }
+            for index in present:
+                counts[index] += 1
+        rows += len(frame)
+        progress.update(rows)
+    if rows != EXPECTED_ROWS["developmentTrain"]:
+        raise RuntimeError(f"Focal-loss counts used {rows:,} development rows; expected {EXPECTED_ROWS['developmentTrain']:,}.")
+    if np.any(counts <= 0):
+        raise RuntimeError("Each selected HGNN label must have a positive count in the development training split.")
+    progress.finish()
+    return counts, rows
+
+
+def focal_positive_alpha(
+    positive_counts: np.ndarray,
+    row_count: int,
+    *,
+    minimum: float,
+    maximum: float,
+) -> np.ndarray:
+    """Derive bounded positive-label focal weights from training prevalence."""
+    counts = np.asarray(positive_counts, dtype=np.float64)
+    if row_count <= 0 or counts.ndim != 1 or np.any(counts <= 0):
+        raise ValueError("Focal-loss positive counts must be a non-empty positive vector.")
+    if not 0.0 < minimum <= maximum < 1.0:
+        raise ValueError("Focal alpha bounds must satisfy 0 < minimum <= maximum < 1.")
+    prevalence = counts / float(row_count)
+    return np.clip(1.0 - prevalence, minimum, maximum).astype(np.float32)
+
+
+def focal_loss_with_logits(logits: torch.Tensor, targets: torch.Tensor, positive_alpha: torch.Tensor, gamma: float) -> torch.Tensor:
+    """Multi-label focal loss with one positive alpha per training-only ADR label."""
+    if gamma < 0:
+        raise ValueError("Focal-loss gamma must be non-negative.")
+    if logits.shape != targets.shape or logits.ndim != 2:
+        raise ValueError("HGNN focal loss requires equally shaped two-dimensional logits and targets.")
+    if positive_alpha.shape != (logits.shape[1],):
+        raise ValueError("HGNN focal loss requires exactly one alpha value per ADR label.")
+    bce = torch.nn.functional.binary_cross_entropy_with_logits(logits, targets, reduction="none")
+    probabilities = torch.sigmoid(logits)
+    probability_of_target = torch.where(targets > 0, probabilities, 1.0 - probabilities)
+    alpha = torch.where(targets > 0, positive_alpha.unsqueeze(0), 1.0 - positive_alpha.unsqueeze(0))
+    return (alpha * torch.pow(1.0 - probability_of_target, gamma) * bce).mean()
 
 
 def _streaming_associations(parquet: pq.ParquetFile, vocabulary: list[dict], window: tuple[str, str], minimum: int) -> dict:
@@ -240,11 +302,15 @@ def _train_epochs(
     best_score: float = -1.0,
     best_epoch: int = -1,
     checkpoint_metadata: dict | None = None,
+    focal_alpha: np.ndarray | None = None,
 ) -> tuple[list, int, float]:
     history = list(history or [])
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
     amp_enabled = bool(config.use_amp and device.type == "cuda")
     scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
+    if focal_alpha is None:
+        raise RuntimeError("A training-only focal-loss alpha vector is required for HGNN training.")
+    alpha_tensor = torch.as_tensor(focal_alpha, dtype=torch.float32, device=device)
     latest_path = run_root / f"{stage}_latest.pt"
     if start_epoch:
         checkpoint = torch.load(latest_path, map_location=device, weights_only=False)
@@ -267,7 +333,7 @@ def _train_epochs(
             optimizer.zero_grad(set_to_none=True)
             with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
                 logits = model(graph)
-                loss = torch.nn.functional.binary_cross_entropy_with_logits(logits, graph["report"].y)
+                loss = focal_loss_with_logits(logits, graph["report"].y, alpha_tensor, config.focal_gamma)
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
@@ -404,6 +470,20 @@ def _per_label_metrics(targets: np.ndarray, probabilities: np.ndarray, vocabular
     return rows
 
 
+def _selection_evaluation_report(targets: np.ndarray, probabilities: np.ndarray, vocabulary: list[dict], top_k: tuple[int, ...]) -> dict:
+    per_label = per_label_metrics(targets, probabilities, vocabulary, thresholds=0.5)
+    ranked = [item for item in per_label if item["auprc"] is not None]
+    top = sorted(ranked, key=lambda item: (-item["auprc"], item["term"]))[:10]
+    bottom = sorted(ranked, key=lambda item: (item["auprc"], item["term"]))[:10]
+    return {
+        "threshold": 0.5,
+        "perLabel": per_label,
+        "top10ByAUPRC": top,
+        "bottom10ByAUPRC": bottom,
+        "topK": top_k_metrics(targets, probabilities, values=top_k),
+    }
+
+
 def _run_scalable_baselines(parquet, vocabulary, serious, config, run_root, state, device) -> list[dict]:
     path = run_root / "hgnn_baselines.joblib"
     if state.is_complete("baselines") and path.exists():
@@ -532,6 +612,48 @@ def train_hgnn_colab(cohort_path: Path, config: HgnnTrainConfig | None = None, t
         atomic_joblib(development_associations_path, development_associations)
         state.complete("development_associations", sourceWindow=list(PARTITIONS["developmentTrain"]), validationRowsUsed=False)
 
+    objective_path = run_root / "hgnn_focal_objective.json"
+    expected_objective = {
+        "name": "focal_loss",
+        "gamma": config.focal_gamma,
+        "alphaRule": "clip(1 - training positive rate, minimum, maximum)",
+        "alphaMinimum": config.focal_alpha_minimum,
+        "alphaMaximum": config.focal_alpha_maximum,
+        "sourceWindow": list(PARTITIONS["developmentTrain"]),
+        "vocabularyIdentity": vocabulary_hash,
+    }
+    if state.is_complete("training_objective") and objective_path.exists():
+        objective = json.loads(objective_path.read_text(encoding="utf-8"))
+        if {key: objective.get(key) for key in expected_objective} != expected_objective:
+            raise RuntimeError("Saved HGNN focal-loss objective differs from the current training-only configuration.")
+    else:
+        positive_counts, counted_rows = _streaming_label_positive_counts(parquet, vocabulary)
+        alpha = focal_positive_alpha(
+            positive_counts,
+            counted_rows,
+            minimum=config.focal_alpha_minimum,
+            maximum=config.focal_alpha_maximum,
+        )
+        objective = {
+            **expected_objective,
+            "rowCount": counted_rows,
+            "positiveCounts": positive_counts.tolist(),
+            "positiveAlpha": alpha.tolist(),
+        }
+        objective["identity"] = stable_hash(objective)
+        atomic_json(objective_path, objective)
+        state.complete(
+            "training_objective",
+            objective="focal_loss",
+            gamma=config.focal_gamma,
+            sourceWindow=list(PARTITIONS["developmentTrain"]),
+            rowCount=counted_rows,
+            identity=objective["identity"],
+        )
+    focal_alpha = np.asarray(objective["positiveAlpha"], dtype=np.float32)
+    if focal_alpha.shape != (len(vocabulary),):
+        raise RuntimeError("Saved HGNN focal-loss alpha vector does not match the ADR vocabulary.")
+
     sample = _first_frame(parquet, PARTITIONS["developmentTrain"])
     selection_checkpoint_metadata = {
         "runIdentity": identity,
@@ -540,6 +662,7 @@ def train_hgnn_colab(cohort_path: Path, config: HgnnTrainConfig | None = None, t
         "validationWindow": list(PARTITIONS["validation"]),
         "graphAssociationSha256": file_sha256(development_associations_path),
         "targetEdgesExcluded": True,
+        "trainingObjective": objective["identity"],
     }
     selection_model = _new_model(config, vocabulary, development_associations, sample, device)
     start_epoch, history, best_score, best_epoch = _resume_model(
@@ -553,6 +676,7 @@ def train_hgnn_colab(cohort_path: Path, config: HgnnTrainConfig | None = None, t
             config=config, run_root=run_root, state=state, start_epoch=start_epoch,
             history=history, best_score=best_score, best_epoch=best_epoch,
             checkpoint_metadata=selection_checkpoint_metadata,
+            focal_alpha=focal_alpha,
         )
     best = torch.load(run_root / "hgnn_selection_best.pt", map_location=device, weights_only=False)
     selection_model.load_state_dict(best["modelState"])
@@ -567,13 +691,37 @@ def train_hgnn_colab(cohort_path: Path, config: HgnnTrainConfig | None = None, t
             selection_model, parquet, PARTITIONS["validation"], vocabulary,
             development_associations, config.batch_size, device,
         )
-        del selection_targets, selection_probabilities
+        selection_details = _selection_evaluation_report(
+            selection_targets, selection_probabilities, vocabulary, tuple(config.evaluation_top_k)
+        )
         atomic_json(selection_evaluation_path, {
             "checkpointIdentity": selection_checkpoint_metadata,
             "bestEpoch": int(best["epoch"]) + 1,
             "validation": validation_metrics,
+            **selection_details,
         })
         state.complete("selection_evaluation", bestEpoch=int(best["epoch"]) + 1, validation=validation_metrics)
+        del selection_targets, selection_probabilities
+
+    # The focal-loss experiment ends at the fully evaluated selection checkpoint.
+    # A final refit, calibration, holdout evaluation, or artifact promotion must
+    # happen only after the selection evidence has been reviewed and frozen.
+    state.complete(
+        "selection_objective_run",
+        selectedEpoch=int(best["epoch"]) + 1,
+        checkpoint="hgnn_selection_best.pt",
+        evaluation="hgnn_selection_evaluation.json",
+        trainingObjective=objective["identity"],
+    )
+    return {
+        "status": "SELECTION_COMPLETE_AWAITING_FINAL_REFIT",
+        "runKey": run_key,
+        "device": str(device),
+        "bestEpoch": int(best["epoch"]) + 1,
+        "validation": validation_metrics,
+        "selectionEvaluation": str(selection_evaluation_path),
+        "trainingObjective": objective["identity"],
+    }
 
     baseline_rows = _run_scalable_baselines(parquet, vocabulary, serious, config, run_root, state, device)
 
@@ -594,6 +742,7 @@ def train_hgnn_colab(cohort_path: Path, config: HgnnTrainConfig | None = None, t
         "graphAssociationSha256": file_sha256(final_associations_path),
         "selectedEpochs": final_epochs,
         "targetEdgesExcluded": True,
+        "trainingObjective": objective["identity"],
     }
     final_model = _new_model(final_config, vocabulary, final_associations, sample, device)
     final_start, final_history, _, _ = _resume_model(
@@ -607,6 +756,7 @@ def train_hgnn_colab(cohort_path: Path, config: HgnnTrainConfig | None = None, t
             config=final_config, run_root=run_root, state=state, start_epoch=final_start,
             history=final_history,
             checkpoint_metadata=final_checkpoint_metadata,
+            focal_alpha=focal_alpha,
         )
 
     calibration_path = run_root / "hgnn_calibration.joblib"
