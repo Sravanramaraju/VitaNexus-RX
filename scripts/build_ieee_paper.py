@@ -97,12 +97,12 @@ def build_paper():
     p_author.paragraph_format.space_before = Pt(0)
     p_author.paragraph_format.space_after = Pt(14)
     
-    r_name = p_author.add_run("Sravan Rama Raju\n")
+    r_name = p_author.add_run("Ramaraju Naga Eswara Sravan, Rajana Ashok, Yadala Hari Prasad, Salimetti Lokesh\n")
     r_name.font.name = 'Times New Roman'
-    r_name.font.size = Pt(11)
+    r_name.font.size = Pt(10.5)
     r_name.font.bold = True
     
-    r_affil = p_author.add_run("Department of Computer Science and Engineering\nJawaharlal Nehru Technological University Hyderabad\nHyderabad, India\nsravantatikonda123@gmail.com")
+    r_affil = p_author.add_run("Department of Computer Science and Engineering\nVignan's Lara Institute of Technology and Science\nGuntur, India\nsravantatikonda123@gmail.com")
     r_affil.font.name = 'Times New Roman'
     r_affil.font.size = Pt(9.5)
     r_affil.font.italic = False
@@ -829,7 +829,7 @@ def build_paper():
     # -------------------------------------------------------------------------
     add_h1("ACKNOWLEDGMENT")
     add_p(
-        "The author acknowledges the public data resources and research infrastructures that made this study possible: the U.S. Food "
+        "The authors acknowledge the public data resources and research infrastructures that made this study possible: the U.S. Food "
         "and Drug Administration (FDA) for the Adverse Event Reporting System (FAERS) public data files; the DDInter research team for "
         "the curated drug-drug interaction knowledge base; the DrugCentral team for the open-access drug and indication database; and "
         "the contributors of the Indian Medicine Dataset for brand-to-generic pharmaceutical terminology records."
