@@ -3,6 +3,7 @@ import json
 
 import numpy as np
 import pytest
+import torch
 
 from vitanexus_ml.models.hgnn_post_training import (
     EXPECTED_RUN_KEY,
@@ -10,9 +11,12 @@ from vitanexus_ml.models.hgnn_post_training import (
     _label_hash,
     cache_frozen_holdout_predictions,
     cache_frozen_predictions,
+    create_checkpoint_integrity_manifest,
     load_prediction_cache,
     verify_checkpoint_integrity,
 )
+from vitanexus_ml.config import HGNN_TRAINING_PIPELINE_VERSION, HGNN_VERSION
+from vitanexus_ml.models.hgnn_colab_pipeline import HgnnTrainConfig
 
 
 def test_checkpoint_guard_rejects_mutated_source(tmp_path):
@@ -33,6 +37,41 @@ def test_checkpoint_guard_rejects_mutated_source(tmp_path):
     protected.write_bytes(b"changed")
     with pytest.raises(RuntimeError, match="changed or is missing"):
         verify_checkpoint_integrity(path)
+
+
+def test_selection_only_manifest_records_focal_checkpoint_without_final_refit(tmp_path):
+    snapshot = tmp_path / "snapshot"
+    run = snapshot / "training_state" / "training_runs" / "hgnn" / "fresh-objective"
+    run.mkdir(parents=True)
+    labels = [{"index": 0, "term": "alpha"}]
+    (run / "adr_vocabulary.json").write_text(json.dumps({"items": labels}), encoding="utf-8")
+    (run / "development_associations.joblib").write_bytes(b"associations")
+    (run / "hgnn_focal_objective.json").write_text(json.dumps({"identity": "focal-objective"}), encoding="utf-8")
+    checkpoint = {
+        "epoch": 19,
+        "checkpointMetadata": {"trainingObjective": "focal-objective"},
+    }
+    torch.save(checkpoint, run / "hgnn_selection_best.pt")
+    torch.save(checkpoint, run / "hgnn_selection_latest.pt")
+    state = {
+        "identity": {
+            "pipelineVersion": HGNN_TRAINING_PIPELINE_VERSION,
+            "modelVersion": HGNN_VERSION,
+            "hgnnConfig": HgnnTrainConfig().__dict__,
+            "input": {"cohort": "fixture"},
+        },
+    }
+    (run / "state.json").write_text(json.dumps(state), encoding="utf-8")
+
+    manifest_path = tmp_path / "integrity.json"
+    manifest = create_checkpoint_integrity_manifest(snapshot, manifest_path, run_key="fresh-objective")
+
+    assert manifest["model"]["selection"]["epoch"] == 20
+    assert manifest["model"]["finalRefit"]["status"].startswith("not-run")
+    assert manifest["model"]["trainingObjective"] == "focal-objective"
+    assert "hgnn_focal_objective.json" in manifest["files"]
+    assert "hgnn_final_refit_latest.pt" not in manifest["files"]
+    assert verify_checkpoint_integrity(manifest_path)["runKey"] == "fresh-objective"
 
 
 def test_prediction_cache_preserves_label_order_and_reloads_without_pickle(tmp_path):
