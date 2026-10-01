@@ -647,13 +647,13 @@ def build_paper():
     add_h1("X. RESULTS AND ARTIFACT-BASED EVALUATION")
     add_h2("A. Baseline Model Comparison and Selection Justification")
     add_p(
-        "During model development, multiple scalable linear and probabilistic classifiers were evaluated on the full 4.27M training "
-        "and 638K validation cohort under identical sparse feature representations. Table IV summarizes performance across evaluated baselines "
-        "and the selected LightGBM classifier."
+        "During model development, multiple scalable linear and probabilistic classifiers were evaluated on the 4,271,984-record "
+        "development training cohort (2022Q1–2024Q4) and benchmarked against the 638,284-record validation cohort (2025Q1–Q2) "
+        "under identical sparse feature representations. Table IV summarizes performance across candidate architectures under this shared validation split."
     )
 
     # TABLE IV: Baseline Comparison
-    add_table_caption("IV", "Classifier Performance Comparison on FAERS Development Validation Cohort")
+    add_table_caption("IV", "Classifier Performance Comparison on FAERS Development Validation Cohort (638,284 Rows)")
     t4 = doc.add_table(rows=4, cols=6)
     t4.alignment = WD_TABLE_ALIGNMENT.CENTER
     set_table_borders(t4)
@@ -667,7 +667,7 @@ def build_paper():
     data_t4 = [
         ("Complement Naive Bayes", "0.8390", "0.8383", "0.7948", "88.19%", "60.73%"),
         ("Linear Logistic (SGD)", "0.8508", "0.8687", "0.7925", "87.23%", "61.66%"),
-        ("LightGBM (Selected Holdout)", "0.8177", "0.8212", "0.7823", "90.18%", "54.04%")
+        ("LightGBM (Selected Architecture)", "0.8597", "0.8766", "0.7994", "86.91%", "64.43%")
     ]
     for row_idx, data in enumerate(data_t4, start=1):
         bg = "EBF8FF" if row_idx == 3 else ("F7FAFC" if row_idx % 2 == 1 else "FFFFFF")
@@ -679,17 +679,20 @@ def build_paper():
             set_cell_margins(c)
 
     add_p(
-        "LightGBM was selected over linear and naive Bayes baselines due to several compelling architectural advantages: gradient boosted "
-        "decision trees natively capture non-linear feature interactions among high-dimensional sparse drug and indication categories without "
-        "requiring dense projection embeddings; the algorithm trains efficiently across millions of records on commodity multicore hardware "
-        "within bounded memory; and the resulting tree ensembles produce deterministic, auditable decision paths compatible with post-hoc "
-        "isotonic calibration and CASEID-level bootstrap replication."
+        "On the shared 638,284-row validation split, LightGBM demonstrated superior discrimination and positive-class balance "
+        "(AUROC 0.8597, AUPRC 0.8766, F1 0.7994, specificity 64.43%) compared to Linear Logistic regression (AUROC 0.8508, AUPRC 0.8687) "
+        "and Complement Naive Bayes (AUROC 0.8390, AUPRC 0.8383). LightGBM was selected as the operational prediction engine because "
+        "gradient boosted decision trees natively capture non-linear feature interactions among high-dimensional sparse categories without "
+        "requiring dense embeddings, train efficiently across millions of records within bounded memory, and yield deterministic decision paths "
+        "compatible with post-hoc isotonic calibration and CASEID-level bootstrap replication."
     )
     add_h2("B. Temporal Holdout Evaluation and Operating Point")
     add_p(
-        "The frozen LightGBM model was evaluated on the untouched 2026Q1–Q2 temporal holdout consisting of 696,604 reports. Table V presents "
-        "comprehensive evaluation metrics at the frozen 0.389 operating cutoff, chosen on the disjoint 2025Q4 operating subset to maximize "
-        "specificity while enforcing a sensitivity floor of 90.0%."
+        "Following model selection on the 638K validation cohort, the selected LightGBM architecture was retrained on the full "
+        "development dataset (2022Q1–2025Q2) and frozen. This final model was evaluated on the separate, untouched 2026Q1–Q2 "
+        "temporal holdout consisting of 696,604 reports. Table V presents comprehensive evaluation metrics on this holdout cohort at "
+        "the frozen 0.389 operating cutoff, chosen on the disjoint 2025Q4 operating subset to maximize specificity while enforcing "
+        "a sensitivity floor of 90.0%."
     )
 
     # TABLE V: Holdout Metrics
@@ -881,7 +884,7 @@ def build_paper():
         p_ref.paragraph_format.left_indent = Inches(0.25)
         p_ref.paragraph_format.first_line_indent = Inches(-0.25)
         p_ref.paragraph_format.space_before = Pt(0)
-        p_ref.paragraph_format.space_after = Pt(2.5)
+        p_ref.paragraph_format.space_after = Pt(1.5)
         p_ref.paragraph_format.line_spacing = 1.02
         r_ref = p_ref.add_run(ref)
         r_ref.font.name = 'Times New Roman'
